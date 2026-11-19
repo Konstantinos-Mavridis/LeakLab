@@ -1,0 +1,21 @@
+# MAT> dominator_tree
+
+Class Name                                                                    | Shallow Heap | Retained Heap | Percentage
+--------------------------------------------------------------------------------------------------------------------------
+io.leaklab.load.LoadEngine_ClientProxy @ 0xc689dad0                           |           72 |    25,165,984 |     42.95%
+io.leaklab.load.LoadEngine @ 0xc688b128                                       |           64 |    25,165,976 |     42.95%
+io.quarkus.bootstrap.runner.RunnerClassLoader @ 0xc344e9d8                    |          136 |       377,040 |      0.64%
+org.jboss.threads.EnhancedQueueExecutor @ 0xc362cde0                          |          112 |       291,816 |      0.50%
+class java.time.zone.ZoneRulesProvider @ 0xc36c1cc0                           |          224 |       181,200 |      0.31%
+class sun.util.calendar.ZoneInfoFile @ 0xc3597c78                             |          224 |       138,072 |      0.24%
+io.vertx.core.impl.VertxThread @ 0xc6877a38                                   |          144 |       114,440 |      0.20%
+io.vertx.core.impl.VertxThread @ 0xc6877b90                                   |          144 |       109,936 |      0.19%
+class java.lang.invoke.MethodType @ 0xc3344a58                                |          224 |       109,400 |      0.19%
+io.smallrye.config.SmallRyeConfig @ 0xc35aa378                                |           32 |       104,568 |      0.18%
+class sun.util.resources.Bundles @ 0xc68459e0                                 |          224 |       101,800 |      0.17%
+class java.util.Locale$LocaleCache @ 0xc68378f8                               |          224 |        98,944 |      0.17%
+com.fasterxml.jackson.databind.ser.DefaultSerializerProvider$Impl @ 0xc68a0980|           72 |        82,984 |      0.14%
+class io.netty.util.internal.StringUtil @ 0xc35d72c0                          |          224 |        78,784 |      0.13%
+class sun.util.locale.BaseLocale$1InterningCache @ 0xc68377e0                 |          224 |        72,000 |      0.12%
+Total: 15 entries                                                             |        2,344 |    52,192,944 |     89.08%
+--------------------------------------------------------------------------------------------------------------------------

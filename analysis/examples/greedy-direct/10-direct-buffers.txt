@@ -1,0 +1,7 @@
+# MAT> histogram java.nio.DirectByteBuffer
+
+Class Name               | Objects | Shallow Heap
+--------------------------------------------------
+java.nio.DirectByteBuffer|   1,664 |      119,808
+Total: 1 entry           |   1,664 |      119,808
+--------------------------------------------------

@@ -1,0 +1,10 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: leaklab
+  labels:
+    app.kubernetes.io/part-of: leaklab
+spec:
+  lookupPolicy:
+    # Lets Deployments say `image: leaklab:latest` and resolve it from this ImageStream.
+    local: true

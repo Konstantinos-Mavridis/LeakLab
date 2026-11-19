@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leaklab
+  labels:
+    app.kubernetes.io/name: leaklab
+    app.kubernetes.io/part-of: leaklab
+spec:
+  replicas: 1
+  # A dump on a RWO volume can only be mounted by one pod at a time.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: leaklab
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: leaklab
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /q/metrics
+    spec:
+      # Give the JVM time to finish writing a dump that SIGTERM interrupted.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        # A mounted PVC hides the image's /dumps (and its chmod g=u): the volume root is usually root-owned.
+        # fsGroup makes the kubelet give the volume to this group so the JVM can write dumps there.
+        # OpenShift's restricted-v2 SCC assigns its own fsGroup — deploy/openshift removes this field.
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: leaklab
+          image: leaklab:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: LEAKLAB_SCENARIO
+              value: base
+            - name: JAVA_OPTS
+              value: -XX:MaxRAMPercentage=60
+            - name: LEAKLAB_DUMP_DIR
+              value: /dumps
+          resources:
+            # requests == limits for memory: the pod never uses more memory than it reserved, so it ranks last for
+            # node-pressure eviction and the only memory-related death is its own cgroup OOM kill. (QoS class is
+            # Burstable because CPU has no limit; add limits.cpu == requests.cpu if you need Guaranteed.)
+            requests:
+              cpu: 500m
+              memory: 768Mi
+            limits:
+              memory: 768Mi
+          # On OOMKill the last log lines become the termination message: visible in `oc describe pod`.
+          terminationMessagePolicy: FallbackToLogsOnError
+          startupProbe:
+            httpGet: { path: /q/health/started, port: http }
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /q/health/ready, port: http }
+            periodSeconds: 5
+          # Liveness never looks at memory. Generous window (12 × 10 s): a heap dump stops the world, for 3–10 s on
+          # JDK 21 and up to ~1 min on JDK 25 (segmented dump + merge) for a ~600 MiB heap in this lab, and a
+          # probe-kill during a dump both destroys the evidence and also shows up as exit code 137.
+          livenessProbe:
+            httpGet: { path: /q/health/live, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: dumps
+              mountPath: /dumps
+      volumes:
+        # Never an emptyDir with medium: Memory (tmpfs) — dump bytes would be charged to the same cgroup
+        # and push the container over its limit while writing the evidence.
+        - name: dumps
+          persistentVolumeClaim:
+            claimName: leaklab-dumps

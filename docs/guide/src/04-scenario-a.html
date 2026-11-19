@@ -1,0 +1,312 @@
+<section class="part" id="scenario-a">
+  <div class="num">A</div>
+  <div class="kicker">Scenario A · port 8080</div>
+  <h1>sized: the good failure</h1>
+  <div class="bar"></div>
+  <p class="lead">A correctly sized JVM with a heap leak. This is how memory failures <i>should</i> happen: the JVM
+    notices first, writes its evidence and stays in control. You will also learn the full investigation method here,
+    from symptom to the line of code.</p>
+  <ul class="inpart">
+    <li>A1 Configuration and verdict</li><li>A2 Healthy churn</li><li>A3 The leak begins</li><li>A4 Recognising the trend</li>
+    <li>A5 Taking heap dumps</li><li>A6 Finding the suspect in MAT</li><li>A7 Driving it into OOM</li><li>A8 What the dump agents did</li>
+    <li>A9 Recovery, and why production shouldn't</li><li>A10 Variant: direct buffers</li>
+  </ul>
+</section>
+
+<section>
+  <div class="step" id="a1"><div class="step-head"><span class="step-no">A1</span><h3>Configuration and verdict</h3><span class="when">compose: sized</span></div>
+<pre>mem_limit: 1g      memswap_limit: 1g
+JAVA_OPTS: "-XX:MaxRAMPercentage=60 -XX:MaxDirectMemorySize=96m"</pre>
+    <div class="box tech"><div class="label">Technically</div>
+      <p>The heap ceiling is derived from the limit (60 % of 1 GiB = <b>614 MiB</b>), leaving ~410 MiB for everything
+        else. Measured non-heap footprint at idle: ~74–79 MiB. Direct memory is capped at 96 MiB, so it can add at most
+        that. Projected peak with a full heap <i>and</i> full direct buffers: 614 + 74 + 95 = <b>784 MiB (76 % of the
+        limit)</b>, so the verdict is <span class="pill ok">SIZED</span> (real verdict). <i>Both</i> JVM-enforced
+        ceilings sit below the kernel's.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The tenant's storage-room rule (614) plus the
+      furniture (79) fits comfortably in the apartment (1024). If the storage room ever fills, the tenant will notice
+      it first, long before the landlord would.</p></div>
+    <div class="box why"><div class="label">Purpose</div><p>This is the reference configuration: the one that makes
+      a heap leak <b>diagnosable</b>. Everything else in the guide is a deviation from it.</p></div>
+  </div>
+
+  <div class="step" id="a2"><div class="step-head"><span class="step-no">A2</span><h3>Healthy churn: lots of allocation, no growth</h3><span class="when">preset "Healthy churn"</span></div>
+    <p>200 requests/s × 256 KiB, 0 % retained, so <b>50 MiB/s of allocation</b> and nothing kept.</p>
+    <div class="box tech"><div class="label">Technically</div>
+      <ol>
+        <li>Each request allocates a <code>byte[262144]</code> and a <code>SessionContext</code> inside the
+          load-engine thread's TLH, in the nursery's <i>allocate</i> space. This is a fast bump-pointer allocation
+          with no lock.</li>
+        <li>When <i>allocate</i> is exhausted, an <b>allocation failure</b> triggers a <b>scavenge</b>. The JVM pauses
+          Java threads briefly, copies the objects still reachable (only the in-flight request) to <i>survivor</i>,
+          and treats the whole of <i>allocate</i> as empty again. Cost scales with <b>live</b> objects, not with
+          garbage. That is why throwing away 50 MiB/s is cheap.</li>
+        <li>GC notifications report "after" occupancy, and GcWatcher's live set stays flat.</li>
+      </ol></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Lots of parcels arrive, get opened and the wrapping
+      goes in the bin by the door. The cleaner empties that bin many times a minute. It's busy, but the room never
+      gets fuller.</p></div>
+    <div class="box why"><div class="label">Purpose</div><p>To calibrate your eye. High allocation and frequent GC are
+      <b>not</b> a leak. Only a rising floor is. Many false leak reports come from people watching heap usage
+      oscillate.</p></div>
+    <table class="cast"><caption>Cast</caption><thead><tr><th>Component</th><th>Represents</th><th>Role in this step</th></tr></thead><tbody>
+      <tr><td>LoadEngine</td><td>Traffic</td><td>Issues 20 requests per 100 ms tick</td></tr>
+      <tr><td>CheckoutService</td><td>Business logic</td><td>Allocates; result discarded on return</td></tr>
+      <tr><td>Nursery / scavenger</td><td>Young-generation GC</td><td>Reclaims short-lived objects in bulk</td></tr>
+      <tr><td>GcWatcher</td><td>GC telemetry</td><td>Records the flat after-GC occupancy</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="step" id="a3"><div class="step-head"><span class="step-no">A3</span><h3>The leak begins</h3><span class="when">preset "Slow leak"</span></div>
+    <p>20 requests/s × 128 KiB × 10 % retained ≈ <b>0.25 MiB/s ≈ 15 MiB/min</b> of permanent growth.</p>
+    <div class="box tech"><div class="label">Technically</div>
+      <ol>
+        <li>On 10 % of requests, <code>CustomerSessionCache.remember(ctx)</code> puts the context in a static
+          <code>ConcurrentHashMap</code>. Because the key is a fresh UUID, the lookup before it never hits.</li>
+        <li>At the next scavenge, the context and its <code>byte[]</code> are <b>reachable</b> (static field → map →
+          node → context → array), so they are copied to survivor. After surviving enough scavenges they are
+          <b>tenured</b>.</li>
+        <li>Tenure fills slowly. When it needs space, a <b>global GC</b> marks reachable objects across the whole
+          heap. The cached contexts are all marked live and none can be freed. The post-global-GC occupancy is
+          higher than last time.</li>
+        <li>If free space after GC falls below <code>-Xminf</code>, OpenJ9 <b>expands</b> the heap (committed grows
+          towards 614 MiB). RSS grows with it as new pages are touched.</li>
+      </ol></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>One in ten parcels gets put in a basket that's tied
+      to the wall. The cleaner moves the basket to the back room because it's clearly still wanted, and it is never
+      emptied. After every full clean the apartment is a little fuller than after the previous one.</p></div>
+    <div class="box why"><div class="label">Purpose</div><p>To show that a leak is <b>quiet</b> at first. Nothing
+      errors and latency is unchanged. Only the trend reveals it, which is why trend-based monitoring matters.</p></div>
+  </div>
+
+  <div class="step" id="a4"><div class="step-head"><span class="step-no">A4</span><h3>Recognising the trend</h3></div>
+    <div class="box tech"><div class="label">Technically · four independent instruments</div>
+      <ul>
+        <li><b>UI live signal</b>: linear regression of the after-GC series over 90 s. Above 2 MiB/min it reports
+          a <i>heap leak signature</i> and estimates time to the limit.</li>
+        <li><b>Verbose GC log</b>: each global cycle's <code>&lt;mem-info&gt;</code> after-collection value rises.
+          IBM GCMV plots "used heap after global collection".</li>
+        <li><b>Prometheus</b>: <code>deriv(leaklab_heap_live_after_gc_bytes[10m]) &gt; 0</code>.</li>
+        <li><b>Class histogram</b> (JDK image): <code>jcmd 1 GC.class_histogram</code> twice;
+          <code>io.leaklab.leak.SessionContext</code> count grows with total requests served.</li>
+      </ul></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Four different people confirm the same thing: the
+      scoreboard, the cleaner's diary, the building's monthly report, and someone who counted the boxes twice. When
+      they agree, you know it's hoarding and not just a busy day.</p></div>
+    <div class="box arch"><div class="label">Architect's note</div><p>Decide at design time which of these instruments
+      exist in production, and that someone will look at them. Typically that means the GC log on a volume (always),
+      Prometheus with a slope alert (always), and the ability to take a histogram or dump (runbook).</p></div>
+  </div>
+
+  <div class="step" id="a5"><div class="step-head"><span class="step-no">A5</span><h3>Taking heap dumps D1 and D2</h3><span class="when">button "Heap dump" · POST /api/dumps/heap</span></div>
+    <div class="box tech"><div class="label">Technically · what happens inside the JVM</div>
+      <ol>
+        <li><code>DumpService</code> calls <code>com.ibm.jvm.Dump.heapDumpToFile("/dumps/heapdump.sized.….phd")</code>.</li>
+        <li>The JVM requests <b>exclusive VM access</b>: every Java thread is brought to a safe point and paused
+          (stop-the-world).</li>
+        <li>The heap is made walkable. Depending on the agent's request options this can include a collection and
+          compaction, so the dump reflects live objects.</li>
+        <li>The dumper walks every object and writes PHD records (class, size, address, outgoing references) to
+          disk, then releases exclusive access. Threads resume.</li>
+      </ol>
+      <p>Take <b>D1</b> after warm-up, run the leak for a fixed interval (for example 4 minutes), then take <b>D2</b>.
+        Two dumps let you see <b>growth</b>; one dump only shows size.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Everyone in the apartment freezes like statues while
+      the photographer photographs every box and every string. Then everyone carries on. A week later the photographer
+      comes back. Comparing the two albums shows what keeps piling up.</p></div>
+    <div class="box lab"><div class="label">In the lab · real numbers</div>
+      <p>A PHD of a ~600 MiB heap full of <code>byte[]</code> payloads was <b>2.7 MiB</b>. PHD stores arrays without
+        their contents, so it records "a byte array of 524 288 bytes at address X" but not the bytes. The guardian's
+        PHD in Scenario D took <b>249 ms</b> to write.</p></div>
+    <div class="box warn"><div class="label">Pitfalls</div>
+      <ul>
+        <li>The pause can last seconds on big heaps. If the liveness probe times out meanwhile, the kubelet SIGKILLs
+          the pod <i>mid-dump</i>: evidence lost, and a death that looks like an OOMKill.</li>
+        <li>Dumps contain production data (here: customer IDs and session payloads). Handle them like a database export.</li>
+      </ul></div>
+  </div>
+
+  <div class="step" id="a6"><div class="step-head"><span class="step-no">A6</span><h3>Finding the suspect in Eclipse MAT</h3></div>
+    <p class="small">The outputs below describe what MAT should show for this lab's leak, based on the code's object graph.
+      Use them to check your own run.</p>
+    <table>
+      <thead><tr><th style="width:4%">#</th><th style="width:22%">Action in MAT</th><th style="width:40%">Technically, what you should see</th><th>Like I'm five</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Install the IBM DTFJ plug-in, open D2, choose <i>Leak Suspects</i></td><td>"The class <code>io.leaklab.leak.CustomerSessionCache</code> … occupies ~90 %+ … accumulated in one instance of <code>ConcurrentHashMap$Node[]</code>"</td><td>A detective's first hunch: "most of the stuff hangs from this one hook."</td></tr>
+        <tr><td>2</td><td><i>Dominator Tree</i>, sorted by retained heap</td><td><code>CustomerSessionCache</code> (class) → <code>ConcurrentHashMap</code> → <code>Node[]</code> → N × <code>SessionContext</code> → <code>byte[]</code>. Tiny shallow, huge retained: the <b>accumulation point</b>.</td><td>Lift that one string and see that almost everything comes with it.</td></tr>
+        <tr><td>3</td><td><i>Histogram</i> → right-click <code>byte[]</code> → <i>Immediate Dominators</i></td><td>The arrays are owned by <code>SessionContext</code>. Never stop at <code>byte[]</code>: it is where bytes live, not why they are kept.</td><td>Don't blame the paper. Ask who keeps the paper.</td></tr>
+        <tr><td>4</td><td>On one <code>SessionContext</code>: <i>Path to GC Roots → exclude weak/soft references</i></td><td>Chain ending at a <b>static field</b> of class <code>CustomerSessionCache</code> (root type: system class). With PHD, field <i>names</i> may be missing; the chain is still conclusive.</td><td>Follow the string from one box all the way back to the hook on the wall.</td></tr>
+        <tr><td>5</td><td>Open D1; in D2's histogram: <i>Compare to another Heap Dump</i></td><td><code>SessionContext</code>, <code>ConcurrentHashMap$Node</code> and <code>byte[]</code> grow by the same N, roughly <i>requests × retention</i>.</td><td>Compare last week's photo with this week's: these boxes multiplied.</td></tr>
+        <tr><td>6</td><td>Map to code</td><td>Who writes to that static map? <code>CustomerSessionCache.remember</code> ← <code>CheckoutService.process(…, retryAware=true)</code>. Root cause: cache keyed by a unique ID, unbounded, with no TTL.</td><td>Find the person who ties things to that hook.</td></tr>
+      </tbody>
+    </table>
+    <div class="box why"><div class="label">Purpose of each technique</div>
+      <p>Leak Suspects <b>proposes</b>, the dominator tree <b>locates</b>, the path to GC roots <b>proves</b>, the diff
+        <b>confirms growth</b>, and the code mapping <b>explains</b>. Skipping "prove" is how teams fix the wrong thing.</p></div>
+    <div class="box arch"><div class="label">Architect's note · the fix pattern</div>
+      <p>Replace the map with a bounded, expiring cache (for example Caffeine
+        <code>maximumSize(…).expireAfterWrite(…)</code>), keyed by a <b>stable idempotency key</b>. Expose its size as
+        a metric. As a design-review rule, every cache or registry should state its bound and its eviction policy.</p></div>
+  </div>
+
+  <div class="step" id="a7"><div class="step-head"><span class="step-no">A7</span><h3>Driving it into OutOfMemoryError</h3><span class="when">preset "Aggressive leak"</span></div>
+    <p>100 requests/s × 512 KiB × 40 % retained = <b>20 MiB/s</b> of leak plus 30 MiB/s of churn.
+      614 MiB ÷ 20 MiB/s ≈ 31 s. The real run reached OOM after <b>~31 s</b>.</p>
+    <div class="box tech"><div class="label">Technically</div>
+      <ol>
+        <li>The heap expands until committed = <code>-Xmx</code>. It cannot grow further.</li>
+        <li>Global GCs become frequent and recover almost nothing, because nearly everything is live. The GC chart
+          shows a growing global share and overhead.</li>
+        <li>An allocation of 512 KiB fails. OpenJ9 runs a full global collection with compaction as a last attempt.
+          It still fails.</li>
+        <li>The JVM raises the <code>systhrow</code> event for <code>java/lang/OutOfMemoryError</code>. Before the
+          exception reaches any Java code, the <b>dump agents run</b> (A8).</li>
+        <li>The <code>OutOfMemoryError: Java heap space</code> is thrown <i>in the allocating thread</i>, here
+          <code>leaklab-load-engine</code>. Other threads that allocate at that moment (HTTP workers) may also get
+          OOMs.</li>
+        <li>LoadEngine catches it, releases the parachute, pauses the load and writes a CRITICAL journal entry. The
+          pause is a lab choice: the leaked memory is still full, and more load would only raise more OOMs. Set
+          <i>After an OutOfMemoryError</i> to <b>Keep running</b> to see what a real service gets instead: OOMs every
+          tick and a tenth of the load served. In the lab, HotSpot (Red Hat 21) kept answering for minutes, while
+          OpenJ9 (Semeru 17) lost its HTTP threads to OOMs within 90 s and became a zombie that only a restart
+          clears. That is why production uses <code>-XX:+ExitOnOutOfMemoryError</code>.</li>
+      </ol></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The storage room reaches its size limit. The tenant
+      asks for one last full clean, and nothing can go, because everything is tied to the wall. The tenant says
+      "storage room full!". The automatic camera takes its photos, then the tenant stops accepting parcels.</p></div>
+    <div class="box why"><div class="label">Purpose</div><p>To see the controlled failure end to end, and to see that
+      the error may hit an <b>innocent thread</b>. The stack trace of an OOM tells you who asked for memory last, not
+      who leaked it. Only the dump tells you that.</p></div>
+  </div>
+
+  <div class="step" id="a8"><div class="step-head"><span class="step-no">A8</span><h3>What the dump agents did</h3></div>
+    <div class="box lab"><div class="label">In the lab · real stderr from the sized container</div>
+<pre><span class="h">JVMDUMP055I Processing dump event "systhrow", detail "java/lang/OutOfMemoryError", exception "Java heap space" at 2026/10/17 09:57:49 - please wait.</span>
+JVMDUMP032I JVM requested System dump using '/dumps/core.20261017.095749.1.0001.dmp' in response to an event
+<span class="y">JVMDUMP012E Error in System dump: /dumps/core.20261017.095749.1.0001.dmp</span>
+JVMDUMP032I JVM requested Heap dump using '/dumps/heapdump.20261017.095749.1.0002.phd' in response to an event
+<span class="g">JVMDUMP010I Heap dump written to /dumps/heapdump.20261017.095749.1.0002.phd</span>
+JVMDUMP032I JVM requested Java dump using '/dumps/javacore.20261017.095749.1.0003.txt' in response to an event
+<span class="g">JVMDUMP010I Java dump written to /dumps/javacore.20261017.095749.1.0003.txt</span>
+JVMDUMP032I JVM requested Snap dump using '/dumps/Snap.20261017.095749.1.0004.trc' in response to an event
+<span class="g">JVMDUMP010I Snap dump written to /dumps/Snap.20261017.095749.1.0004.trc</span>
+JVMDUMP056I Processed dump event "systhrow", detail "java/lang/OutOfMemoryError" at 2026/10/17 09:57:56 (6.466 seconds).</pre>
+      <p>Files left in <code>./dumps/semeru-25/sized</code>: 4 × <code>heapdump…phd</code> (2.7 MiB each), 4 × <code>javacore…txt</code>,
+        2 × <code>Snap…trc</code>, and the verbose GC logs.</p></div>
+    <table>
+      <thead><tr><th style="width:22%">Line / file</th><th>Technically</th><th style="width:32%">Like I'm five</th></tr></thead>
+      <tbody>
+        <tr><td><code>055I … please wait</code></td><td>The event fired; the agents run in priority order while Java threads are held.</td><td>"Alarm! Everybody freeze, we're documenting."</td></tr>
+        <tr><td>System dump, <code>012E</code></td><td>The OS core failed. On Linux, OpenJ9 produces cores through the kernel's core-dump mechanism, which is controlled by the <b>host's</b> <code>core_pattern</code> and limits. Docker Desktop's VM didn't permit it. Common in containers.</td><td>The big full-house X-ray machine wasn't plugged in. The other cameras still worked.</td></tr>
+        <tr><td>Heap dump <code>.phd</code></td><td>Object graph for MAT.</td><td>The photo album.</td></tr>
+        <tr><td>Java dump <code>javacore</code></td><td>Threads, locks, GC history, NATIVEMEMINFO, ENVINFO.</td><td>The written report.</td></tr>
+        <tr><td>Snap <code>.trc</code></td><td>Internal trace buffer for IBM support.</td><td>The building's CCTV loop.</td></tr>
+        <tr><td><code>056I … (6.466 seconds)</code></td><td>Total time the JVM spent writing evidence for this event.</td><td>Documenting took about 6½ seconds.</td></tr>
+        <tr><td>Why 4 of each</td><td>Each thrown OOM is a separate event. The default heap/java/snap agents fire for the first 4 (<code>range=1..4</code>) and the system agent only for the first.</td><td>The camera takes photos for the first four alarms, then stops to save film.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="step" id="a9"><div class="step-head"><span class="step-no">A9</span><h3>Recovery, and why production should not recover</h3><span class="when">button "Release retained"</span></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <p>"Release" clears the map, calls <code>System.gc()</code> and re-arms the parachute. Real result:
+        <b>577 MiB released; heap 66 MiB, live set 37 MiB</b> a few seconds later. The service carried on.</p>
+      <p>The first version of LeakLab did <i>not</i> survive. After the OOM, the HTTP layer kept failing with:</p>
+<pre>ERROR [io.ve.ex.we.RoutingContext] Unhandled exception in router:
+<span class="h">java.lang.BootstrapMethodError: java.lang.OutOfMemoryError: Java heap space</span></pre>
+      <p>Lambdas and string concatenation use <code>invokedynamic</code> call sites, which are <b>linked on first
+        use</b>. If that linkage fails (here, because of the OOM), the JVM specification makes the failure
+        <b>permanent for that call site</b>. Every later call rethrows the same error, even after memory has been
+        freed. The fix in the lab has two parts: a 24 MiB <b>parachute</b> array that is dropped on OOM to give the
+        control plane room to work, and a <b>warm-up</b> at boot that links the telemetry call sites while memory is
+        plentiful.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>When the storage room was completely full, a worker
+      tried to learn a new task and failed. Now they believe for ever that they "can't do that task", even after the
+      room has been cleared. The lab cheats by keeping a small empty emergency corner, and by having workers practise
+      every task on day one.</p></div>
+    <div class="box arch"><div class="label">Architect's note</div>
+      <p>In production, prefer <b>fail fast</b>: <code>-XX:+ExitOnOutOfMemoryError</code>. The dump agents run first, then the process
+        exits, and Kubernetes starts a clean instance. A half-broken JVM that stays "up" and passes liveness checks
+        is worse than a restart.</p></div>
+  </div>
+
+  <div class="step" id="a10"><div class="step-head"><span class="step-no">A10</span><h3>Variant: the direct-buffer leak</h3><span class="when">target "Direct"</span></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <p><code>ByteBuffer.allocateDirect</code> takes native memory, counted against <code>MaxDirectMemorySize</code>
+        (96 MiB here). A <i>Cleaner</i> frees it when the small <code>DirectByteBuffer</code> on the heap is collected;
+        retained ones never are, so at 96 MiB the next allocation throws <code>OutOfMemoryError: Cannot reserve … bytes
+        of direct buffer memory</code> and the JVM lives on. <code>java.nio.Bits</code> throws it, not the VM, so the
+        default OOM agents <b>don't fire</b> (verified; nor does HotSpot's flag). The image's <code>events=throw</code>
+        agent writes the dumps; its <code>msg_filter=*direct*</code> stops a re-thrown heap OOM from using up its one
+        shot. Uncapped, the container would be killed first: that is Scenario C.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Crates are stored outside the storage room, but the
+      tenant keeps a tally with its own limit of 96. When the tally is full, the tenant raises the alarm themselves,
+      before the landlord notices.</p></div>
+    <div class="box why"><div class="label">Purpose</div><p>It shows the general principle: <b>caps turn silent kills into
+      diagnosable errors</b>. Whenever a native consumer can be capped inside the JVM, cap it.</p></div>
+  </div>
+
+  <div class="box arch nobreak"><div class="label">Scenario A · key takeaways</div>
+    <ul>
+      <li>Sizing by percentage of the container limit, with real headroom, makes the JVM the first to fail.</li>
+      <li>The live set after GC is the leak indicator. Heap usage and GC frequency alone are not.</li>
+      <li>Investigate with at least two dumps: propose, locate, prove, confirm, explain.</li>
+      <li>OpenJ9 writes evidence on OOM by default, provided <code>/dumps</code> is a writable, persistent volume.</li>
+      <li>After OOM, exit and restart. Don't limp on.</li>
+    </ul></div>
+</section>
+
+<section class="readiness flow" id="a-ready">
+  <h2>A · Forensics readiness: what must be in place to diagnose a heap leak</h2>
+  <p>A heap leak can only be investigated with evidence that was set up to exist <i>before</i> the leak. Most items
+    below are JVM flags or pod-spec settings, and those only take effect after a restart. If you start configuring them
+    during an incident, the restart wipes the leaked state you wanted to study. That's why they belong in the platform
+    standard, not the runbook.</p>
+  <div class="legend"><span>When it must be in place:</span>
+    <span class="tw build">image build</span>
+    <span class="tw start">start-up · restart</span>
+    <span class="tw live">runtime · no restart</span>
+    <span class="tw platform">platform · beforehand</span>
+    <span class="tw after">after the fact</span>
+    <span>· Lab: <span class="lab-yes">✓</span> in LeakLab · <span class="lab-part">◐</span> partly · <span class="lab-no">✗</span> not set</span>
+  </div>
+  <table class="ready">
+    <thead><tr><th>Requirement</th><th>Default</th><th>Why it matters</th><th>How: flags, config, tools</th><th>When / restart</th><th>Lab</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="6">Capture</td></tr>
+      <tr><td>Persistent, writable dump directory</td><td><span class="def off">off</span><br>dumps land in the JVM's working directory (<code>/deployments</code>, the container layer)</td><td>Dumps must outlive the container and must not fill its writable layer (risking eviction)</td><td><code>-Xdump:directory=/dumps</code> + a volume/PVC at <code>/dumps</code>, writable by the runtime UID (group 0 on OpenShift), sized for heap dumps + a core</td><td><span class="tw start">start-up · restart</span><span class="tw build">image build</span> (permissions)</td><td class="lab-yes">✓</td></tr>
+      <tr><td>Dump on OutOfMemoryError</td><td><span class="def on">on · OpenJ9</span><br><span class="def off">off · HotSpot</span></td><td>Captures the heap at the moment of failure</td><td>OpenJ9: <b>on by default</b> (heapdump, javacore, snap, core); check with <code>java -Xdump:what -version</code>. HotSpot: <code>-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/dumps</code></td><td>OpenJ9: nothing to do<br>HotSpot: <span class="tw start">start-up · restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Dump on a library-thrown OOM (direct buffers)</td><td><span class="def off">off</span><br>both JVMs; verified: no dump</td><td>"Cannot reserve … direct buffer memory" is thrown by Java code, not the VM: the default <code>systhrow</code> agents and <code>HeapDumpOnOutOfMemoryError</code> ignore it, so a capped direct leak is <i>caught</i> but leaves no evidence</td><td>OpenJ9: <code>-Xdump:java+heap:events=throw,filter=java/lang/OutOfMemoryError,msg_filter=*direct*,range=1..1</code> (reports every Java throw to the dump engine, which costs a little on exception-heavy code). HotSpot: no flag; take a dump when the error is logged (<code>jcmd 1 GC.heap_dump</code>)</td><td><span class="tw start">start-up · restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>On-demand heap dumps (D1, D2)</td><td><span class="def off">off</span><br>SIGQUIT = javacore only</td><td>The two-dump technique needs dumps <i>before</i> the OOM; OOM dumps alone have no baseline</td><td>Any one of: <code>-Xdump:heap:events=user</code>, then <code>kill -QUIT 1</code>; a JDK image with <code>jcmd 1 Dump.heap /dumps/x.phd</code>; app code calling <code>com.ibm.jvm.Dump.heapDumpToFile</code> (OpenJ9 can also add agents at runtime via <code>Dump.setDumpOptions(…)</code> if the code exposes it)</td><td><span class="tw start">start-up · restart</span> or <span class="tw build">image build</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>javacore on demand</td><td><span class="def on">on</span></td><td>Threads, GC history, the cgroup limit the JVM saw</td><td><code>kill -QUIT 1</code>. This is OpenJ9's default behaviour and needs no flag</td><td><span class="tw live">runtime · no restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>A way to deliver the signal</td><td><span class="def var">varies</span><br>needs a shell, or a debug container</td><td><code>kill -QUIT 1</code> is the trigger for javacores (and heap dumps with the SIGQUIT agent). Something has to send it</td><td>Docker: <code>docker kill -s QUIT &lt;container&gt;</code> works with no shell (verified). Kubernetes has no signal API: <code>kubectl exec … sh -c 'kill -QUIT 1'</code> needs a shell in the image; distroless images need an ephemeral debug container sharing the PID namespace (<code>kubectl debug --target</code>)</td><td><span class="tw build">image build</span> (shell)<span class="tw platform">platform</span> (exec/debug RBAC)</td><td class="lab-yes">✓</td></tr>
+      <tr><td>Volume writable by the runtime UID</td><td><span class="def off">off</span><br>a fresh PVC is usually root-owned</td><td>The image's <code>chmod g=u /dumps</code> doesn't apply to a mounted volume, because the mount hides the image directory. Dumps then fail with a permission error</td><td>Kubernetes: <code>securityContext.fsGroup</code> (group ownership of the volume). OpenShift <code>restricted-v2</code> assigns <code>fsGroup</code> automatically. Docker on Linux: <code>chown</code>/<code>chmod</code> the host directory</td><td><span class="tw start">start-up · restart</span> (pod spec)</td><td class="lab-yes">✓</td></tr>
+      <tr><td>Writable <code>/tmp</code> and dump location under a read-only root FS</td><td><span class="def on">on</span><br>unless <code>readOnlyRootFilesystem: true</code></td><td>With a read-only root filesystem, the default dump location (the working directory) and the attach mechanism used by <code>jcmd</code> both fail</td><td><code>emptyDir</code> at <code>/tmp</code>; dumps on their own volume (<code>-Xdump:directory</code>)</td><td><span class="tw start">start-up · restart</span> (pod spec)</td><td class="lab-yes">✓</td></tr>
+      <tr class="group"><td colspan="6">Trend</td></tr>
+      <tr><td>Verbose GC log</td><td><span class="def off">off</span><br>both JVMs; verified: no GC output at all</td><td>Proves the rising floor and survives a kill. It must already be running when the leak starts</td><td>OpenJ9: <code>-Xverbosegclog:/dumps/verbosegc.%Y%m%d.%H%M%S.%pid.%seq.log,5,20000</code>. HotSpot: <code>-Xlog:gc*:file=…</code>, or at runtime <code>jcmd 1 VM.log output=… what=gc</code></td><td>OpenJ9: <span class="tw start">start-up · restart</span><br>HotSpot: also <span class="tw live">runtime</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Heap metrics and alert history</td><td><span class="def off">off</span><br>needs instrumentation</td><td>Shows <i>when</i> it started. History cannot be created after the fact</td><td>Micrometer/Prometheus: <code>jvm_memory_used_bytes</code>, GC pauses, live set after GC; alert on its slope</td><td><span class="tw build">image build</span><span class="tw platform">platform · beforehand</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Metrics actually scraped</td><td><span class="def off">off</span></td><td>An exposed <code>/q/metrics</code> endpoint has no history unless something scrapes it</td><td>OpenShift: a <code>ServiceMonitor</code>, with user-workload monitoring enabled by the cluster admin; its monitoring <b>ignores</b> <code>prometheus.io/*</code> annotations. Plain Prometheus: annotations or a scrape config</td><td><span class="tw platform">platform · beforehand</span> (no pod restart)</td><td class="lab-yes">✓</td></tr>
+      <tr><td>Allocation call paths</td><td><span class="def off">off</span></td><td>A heap dump shows <i>who holds</i> objects, not <i>who allocated</i> them</td><td>OpenJ9: <code>-Xdump:stack:events=allocation,filter=#1m</code> prints the Java stack of large allocations. HotSpot: JFR, either <code>-XX:StartFlightRecording</code> at start-up or <code>jcmd 1 JFR.start</code> at runtime (JDK image)</td><td>OpenJ9: <span class="tw start">start-up · restart</span><br>HotSpot: also <span class="tw live">runtime</span></td><td class="lab-no">✗</td></tr>
+      <tr class="group"><td colspan="6">Survive and retrieve</td></tr>
+      <tr><td>Heap sized inside the limit</td><td><span class="def var">varies</span><br>OpenJ9: 50 % / limit−512 MiB / 75 %; non-heap not budgeted</td><td>Otherwise the leak ends as Scenario B (no dumps), not A</td><td><code>-XX:MaxRAMPercentage</code> with measured headroom; <code>-XX:MaxDirectMemorySize</code></td><td><span class="tw start">start-up · restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Probes tolerate dump pauses</td><td><span class="def off">off</span><br>K8s defaults: timeout 1 s, 3 failures</td><td>A probe kill in the middle of a dump destroys the evidence</td><td>Liveness <code>timeoutSeconds × failureThreshold</code> &gt; the longest dump pause</td><td><span class="tw start">start-up · restart</span> (pod spec)</td><td class="lab-yes">✓</td></tr>
+      <tr><td>Exit after OOM</td><td><span class="def off">off</span></td><td>No half-broken JVM; a clean restart after the dumps are written</td><td><code>-XX:+ExitOnOutOfMemoryError</code></td><td><span class="tw start">start-up · restart</span></td><td class="lab-no">✗</td></tr>
+      <tr><td>Copy-out path</td><td><span class="def var">varies</span><br>image-dependent</td><td>Dumps have to reach the workbench</td><td><code>tar</code> in the image for <code>kubectl cp</code> / <code>oc rsync</code>; or mount the PVC in a helper pod; RBAC for exec/cp</td><td><span class="tw build">image build</span><span class="tw platform">platform</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Central log retention</td><td><span class="def off">off</span><br>kubelet keeps ~10 MiB per container</td><td><code>JVMDUMP…</code> lines and <code>OutOfMemoryError</code> stack traces go to stdout. The kubelet rotates them, keeps one previous instance, and deletes them with the pod</td><td>Cluster log collection with retention (OpenShift Logging, Loki, EFK)</td><td><span class="tw platform">platform · beforehand</span></td><td class="lab-part">◐</td></tr>
+      <tr class="group"><td colspan="6">Analyse</td></tr>
+      <tr><td>Analysis workbench</td><td><span class="def na">n/a</span></td><td>Parses PHD; never inside the production pod</td><td>Eclipse MAT + IBM DTFJ on a JDK (<code>leaklab-analyzer</code>), RAM ≥ 1–1.5× the dump's heap</td><td><span class="tw after">after the fact</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Data-handling policy</td><td><span class="def na">n/a</span></td><td>Dumps contain user data</td><td>Classification, encrypted storage, access control, retention</td><td><span class="tw platform">platform · beforehand</span></td><td class="lab-part">◐</td></tr>
+    </tbody>
+  </table>
+  <p class="small">The <b>Default</b> column shows what you get with no configuration at all. It was verified on the
+    Semeru 25 image by running LeakLab with the diagnostic options removed: 115 scavenges and 2 global GCs produced
+    <b>no GC output anywhere</b>, and <code>kill -QUIT 1</code> produced only a javacore, written to
+    <code>/deployments</code> in the container's writable layer. <span class="lab-no">✗</span> Exit after OOM is off in
+    LeakLab on purpose, so you can explore the JVM after the error. Turn it on in production.
+    <span class="lab-part">◐</span> Central logs: Docker keeps container logs until the container is removed; the lab
+    has no log collection.</p>
+  <div class="box eli5"><div class="label">Like I'm five</div><p>The camera, the diary and the locker in the basement
+    must be installed <i>before</i> anything goes wrong. Installing a camera means moving out and back in (a restart),
+    and that throws away the mess you wanted to photograph. Only the "write a report now" bell (javacore) works
+    whenever you ring it.</p></div>
+</section>

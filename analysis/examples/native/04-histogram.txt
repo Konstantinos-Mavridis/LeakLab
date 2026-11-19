@@ -1,0 +1,21 @@
+# MAT> histogram
+
+Class Name                                   | Objects | Shallow Heap
+----------------------------------------------------------------------
+byte[]                                       |  32,255 |   52,445,984
+java.lang.Class                              |   7,744 |    1,734,656
+java.lang.String                             |  31,206 |      748,944
+java.lang.Object[]                           |   3,434 |      403,152
+java.util.HashMap$Node                       |  11,948 |      286,752
+java.util.concurrent.ConcurrentHashMap$Node  |  10,361 |      248,664
+char[]                                       |     366 |      157,104
+java.lang.invoke.MemberName                  |   2,562 |      143,472
+int[]                                        |     482 |      130,080
+java.util.HashMap$Node[]                     |     702 |      123,120
+java.util.concurrent.ConcurrentHashMap$Node[]|     572 |      114,880
+java.lang.reflect.Method                     |   1,003 |       88,264
+jdk.internal.util.SoftReferenceKey           |   2,273 |       72,736
+java.lang.Class$ReflectRef                   |   1,557 |       62,280
+java.lang.Class[]                            |   3,184 |       62,232
+Total: 15 entries                            | 109,649 |   56,822,320
+----------------------------------------------------------------------

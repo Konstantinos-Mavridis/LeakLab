@@ -1,0 +1,107 @@
+# LeakLab — Quarkus on Java 17, 21 or 25 (all LTS), with a choice of JVM. JVM selects the VM family (stage + diagnostics),
+# JAVA_VERSION the release the jar is compiled for, the image argument the distribution, which must match JAVA_VERSION.
+# compose does all three through the env files, <jvm>-<version>.env (redhat-21.env, semeru-25.env, …).
+#
+#   # Red Hat build of OpenJDK 21 (HotSpot, UBI 9) — the default:
+#   docker build -t leaklab:1.0.0-redhat-21 -f Containerfile .
+#   # Red Hat build of OpenJDK 25:
+#   docker build -t leaklab:1.0.0-redhat-25 --build-arg JAVA_VERSION=25 --build-arg HOTSPOT_IMAGE=registry.access.redhat.com/ubi9/openjdk-25 -f Containerfile .
+#   # IBM Semeru Runtime 25 (Eclipse OpenJ9):
+#   docker build -t leaklab:1.0.0-semeru-25 --build-arg JVM=openj9 --build-arg JAVA_VERSION=25 --build-arg RUNTIME_IMAGE=ibm-semeru-runtimes:open-25-jre-noble -f Containerfile .
+#   # IBM Semeru Runtime 21 on Red Hat UBI 9 (OpenShift-certified base) instead of Ubuntu Noble:
+#   docker build -t leaklab:1.0.0-semeru-21-ubi --build-arg JVM=openj9 --build-arg RUNTIME_IMAGE=icr.io/appcafe/ibm-semeru-runtimes:open-21-jre-ubi9-minimal -f Containerfile .
+#   # Eclipse Temurin 21 (HotSpot, Eclipse Adoptium):
+#   docker build -t leaklab:1.0.0-temurin-21 --build-arg HOTSPOT_IMAGE=eclipse-temurin:21-jdk -f Containerfile .
+#   # Red Hat build of OpenJDK 17 on UBI 8, image 1.21 (pinned: OpenJDK 17.0.16):
+#   docker build -t leaklab:1.0.0-redhat-17 --build-arg JAVA_VERSION=17 --build-arg HOTSPOT_IMAGE=registry.access.redhat.com/ubi8/openjdk-17:1.21 -f Containerfile .
+#   # Oracle's OpenJDK 25 build, or Oracle JDK (Oracle licence terms; `docker login container-registry.oracle.com` first):
+#   #   --build-arg JAVA_VERSION=25 --build-arg HOTSPOT_IMAGE=container-registry.oracle.com/java/openjdk:25   (…/java/jdk:25)
+# HotSpot images must be JDKs: on-demand heap dumps use jcmd (SIGQUIT only prints a thread dump).
+# One builder for every version: javac --release 17 or 21 on a JDK 25 compiles against exactly that release's API.
+#
+# Works unchanged with OpenShift BuildConfig (Docker strategy / buildah) and podman.
+
+ARG BUILDER_IMAGE=maven:3.9.16-ibm-semeru-25-noble
+ARG RUNTIME_IMAGE=ibm-semeru-runtimes:open-21-jre-noble
+ARG HOTSPOT_IMAGE=registry.access.redhat.com/ubi9/openjdk-21
+ARG JVM=hotspot
+ARG JAVA_VERSION=21
+
+# ---------------------------------------------------------------- build
+FROM ${BUILDER_IMAGE} AS build
+ARG JAVA_VERSION
+WORKDIR /src
+COPY pom.xml .
+# Warm the dependency layer so source edits do not re-download the world.
+RUN mvn -B -q dependency:go-offline -Dmaven.compiler.release=${JAVA_VERSION} || true
+COPY src ./src
+# Java 25: the java25 profile swaps the sun.misc.Unsafe native allocator for FFM (a preview API on Java 21).
+RUN mvn -B -q package -DskipTests -Dmaven.compiler.release=${JAVA_VERSION}
+
+# ---------------------------------------------------------------- runtime: OpenJ9 (--build-arg JVM=openj9)
+FROM ${RUNTIME_IMAGE} AS runtime-openj9
+
+# JAVA_OPTS       — sizing, overridden per scenario (compose / Deployment env).
+# JAVA_DIAG_OPTS  — OpenJ9 diagnostics, identical everywhere:
+#   -Xdump:directory=/dumps         every dump agent writes to the mounted volume (never the container's writable layer)
+#   -Xdump:heap:events=user         `kill -QUIT 1` now yields a heap dump too, not only a javacore — the JRE image has no jcmd
+#   -Xdump:java+heap:events=throw,filter=java/lang/OutOfMemoryError,msg_filter=*direct*,range=1..1
+#                                   OOMs thrown by Java code rather than the VM — "Cannot reserve … direct buffer memory" —
+#                                   are a "throw" event, which the built-in "systhrow" agents ignore (HotSpot's
+#                                   HeapDumpOnOutOfMemoryError ignores them too). First occurrence only.
+#                                   msg_filter is essential: a heap OOM that Java code re-throws is ALSO a "throw" event,
+#                                   and without the filter it uses up the one-shot agent before any direct-buffer OOM (seen).
+#   -Xverbosegclog:...,5,20000      rotating verbose GC log (5 files x 20k cycles) for GCMV: the rising floor is visible here first.
+#                                   The start timestamp is in the name because %pid is always 1 in a container: without it,
+#                                   every restart would overwrite the previous run's log — the one you need after an OOMKill.
+# OpenJ9's built-in agents already write javacore + heapdump + snap (first 4) and a system core (first 1) when the VM
+# throws OutOfMemoryError (heap exhausted).
+ENV LANG=C.UTF-8 \
+    LEAKLAB_DUMP_DIR=/dumps \
+    JAVA_OPTS="-XX:MaxRAMPercentage=60" \
+    JAVA_DIAG_OPTS="-Xdump:directory=/dumps -Xdump:heap:events=user -Xdump:java+heap:events=throw,filter=java/lang/OutOfMemoryError,msg_filter=*direct*,range=1..1 -Xverbosegclog:/dumps/verbosegc.%Y%m%d.%H%M%S.%pid.%seq.log,5,20000"
+
+# exec: java becomes PID 1, so SIGTERM/SIGQUIT reach the JVM directly (kill -QUIT 1 → javacore + heap dump).
+ENTRYPOINT ["/bin/sh", "-c", "exec java $JAVA_DIAG_OPTS $JAVA_OPTS --enable-native-access=ALL-UNNAMED -jar /deployments/quarkus-run.jar"]
+
+# ---------------------------------------------------------------- runtime: HotSpot (default)
+FROM ${HOTSPOT_IMAGE} AS runtime-hotspot
+
+# HotSpot writes NOTHING on OutOfMemoryError and logs no GC by default, so JAVA_DIAG_OPTS turns on:
+#   -XX:+HeapDumpOnOutOfMemoryError   an .hprof on the FIRST VM-thrown OOM (not for direct-buffer OOMs: no flag covers those)
+#   -XX:NativeMemoryTracking=summary  NMT, the counterpart of NATIVEMEMINFO: `jcmd 1 VM.native_memory summary`.
+#                                     Start-up only (5–10 % overhead); cannot be switched on later.
+#   -Xlog:gc*:file=...%t...           unified GC log, rotating; %t = start time, because %p is always 1 in a container
+# The entrypoint adds -XX:HeapDumpPath with the start time: HotSpot names the file java_pid<pid>.hprof and REFUSES to
+# overwrite it ("Unable to create /dumps/java_pid1.hprof: File exists"), so after a restart the next OOM dump is lost.
+# SIGQUIT only prints a thread dump to stdout. Heap dumps on demand: `jcmd 1 GC.heap_dump` (this is a JDK image).
+ENV LANG=C.UTF-8 \
+    LEAKLAB_DUMP_DIR=/dumps \
+    JAVA_OPTS="-XX:MaxRAMPercentage=60" \
+    JAVA_DIAG_OPTS="-XX:+HeapDumpOnOutOfMemoryError -XX:NativeMemoryTracking=summary -Xlog:gc*:file=/dumps/gc.%t.log:time,uptime,level,tags:filecount=5,filesize=20m"
+
+ENTRYPOINT ["/bin/sh", "-c", "exec java $JAVA_DIAG_OPTS -XX:HeapDumpPath=/dumps/java_oom.$(date -u +%Y%m%d.%H%M%S).hprof $JAVA_OPTS --enable-native-access=ALL-UNNAMED -jar /deployments/quarkus-run.jar"]
+
+# ---------------------------------------------------------------- final image
+FROM runtime-${JVM}
+
+LABEL org.opencontainers.image.title="leaklab" \
+      org.opencontainers.image.description="JVM memory-leak & OOMKill forensics lab (Quarkus on Java 17, 21 or 25, HotSpot or OpenJ9)" \
+      io.k8s.display-name="LeakLab" \
+      io.openshift.tags="java,openj9,hotspot,quarkus,diagnostics"
+
+WORKDIR /deployments
+COPY --from=build --chown=1001:0 /src/target/quarkus-app/lib/ /deployments/lib/
+COPY --from=build --chown=1001:0 /src/target/quarkus-app/*.jar /deployments/
+COPY --from=build --chown=1001:0 /src/target/quarkus-app/app/ /deployments/app/
+COPY --from=build --chown=1001:0 /src/target/quarkus-app/quarkus/ /deployments/quarkus/
+
+# Group 0 + g=u: OpenShift runs the pod with an arbitrary UID that belongs to the root group.
+# The Red Hat images run as UID 185: back to root for this step, then to 1001 below.
+USER root
+RUN mkdir -p /dumps && chown 1001:0 /dumps && chmod -R g=u /dumps /deployments
+
+USER 1001
+EXPOSE 8080
+VOLUME ["/dumps"]
+# ENTRYPOINT comes from the selected runtime stage above.

@@ -1,0 +1,21 @@
+# MAT> dominator_tree
+
+Class Name                                                                    | Shallow Heap | Retained Heap | Percentage
+--------------------------------------------------------------------------------------------------------------------------
+io.leaklab.load.LoadEngine_ClientProxy @ 0xe83bd330                           |           72 |    25,165,984 |     42.80%
+io.leaklab.load.LoadEngine @ 0xe836a2e8                                       |           64 |    25,165,976 |     42.80%
+io.quarkus.bootstrap.runner.RunnerClassLoader @ 0xe80c8a10                    |          136 |       377,736 |      0.64%
+class java.time.zone.ZoneRulesProvider @ 0xe84bad18                           |          224 |       181,200 |      0.31%
+org.jboss.threads.EnhancedQueueExecutor @ 0xe841b870                          |          112 |       180,072 |      0.31%
+class sun.util.calendar.ZoneInfoFile @ 0xe8251600                             |          224 |       138,072 |      0.23%
+class io.leaklab.leak.NativeMemoryVault @ 0xe84bcd10                          |          224 |       124,000 |      0.21%
+class java.lang.invoke.MethodType @ 0xe8004a58                                |          224 |       118,856 |      0.20%
+io.vertx.core.impl.VertxThread @ 0xe8326d10                                   |          144 |       116,536 |      0.20%
+class io.vertx.core.http.impl.MimeMapping @ 0xeb6794c8                        |          224 |       115,016 |      0.20%
+io.vertx.core.impl.VertxThread @ 0xe8313b28                                   |          144 |       113,616 |      0.19%
+io.smallrye.config.SmallRyeConfig @ 0xe8278270                                |           32 |       104,752 |      0.18%
+class sun.util.resources.Bundles @ 0xe82fcc78                                 |          224 |       101,760 |      0.17%
+class java.util.Locale$LocaleCache @ 0xe82eeb90                               |          224 |        98,944 |      0.17%
+com.fasterxml.jackson.databind.ser.DefaultSerializerProvider$Impl @ 0xeb524f50|           72 |        84,560 |      0.14%
+Total: 15 entries                                                             |        2,344 |    52,187,080 |     88.75%
+--------------------------------------------------------------------------------------------------------------------------

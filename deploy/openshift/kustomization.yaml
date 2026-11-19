@@ -1,0 +1,39 @@
+# Everything for OpenShift in one apply:
+#   oc new-project leaklab
+#   oc apply -k deploy/openshift
+#   oc start-build leaklab --from-dir=app --follow
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: leaklab
+resources:
+  - build
+  - routes.yaml
+  - servicemonitor.yaml
+  - ../k8s/overlays/sized
+  - ../k8s/overlays/overcommit
+  - ../k8s/overlays/greedy        # C
+  - ../k8s/overlays/native        # D
+  - ../k8s/overlays/g1            # G
+  # - ../k8s/overlays/manual      # M · your own sizing: edit the overlay, uncomment, and `oc expose svc/leaklab-manual`
+images:
+  # Resolved through the ImageStream (lookupPolicy.local: true).
+  - name: leaklab
+    newName: leaklab
+    newTag: latest
+patches:
+  - target: { kind: Deployment }
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          # Roll the pods whenever a new build lands in the ImageStream.
+          image.openshift.io/triggers: '[{"from":{"kind":"ImageStreamTag","name":"leaklab:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"leaklab\")].image"}]'
+      - op: add
+        path: /spec/template/metadata/annotations/alpha.image.policy.openshift.io~1resolve-names
+        value: "*"
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+      # restricted-v2 assigns fsGroup from the project's range; a fixed value would be rejected at admission.
+      - op: remove
+        path: /spec/template/spec/securityContext/fsGroup

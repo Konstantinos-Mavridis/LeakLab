@@ -1,0 +1,15 @@
+global GC end (UTC)       used after GC      heap size   pause ms
+2026-10-17T10:04:42.909         30.5 MiB        46.4 MiB       40.0
+2026-10-17T10:04:42.976         54.5 MiB        81.1 MiB       33.7
+2026-10-17T10:20:56.129         55.6 MiB        84.2 MiB       17.5
+2026-10-17T10:24:35.007         55.5 MiB        84.2 MiB       45.4
+2026-10-17T10:33:49.952         55.5 MiB        84.2 MiB       13.7
+2026-10-17T10:41:11.152         55.6 MiB        84.2 MiB       40.3
+2026-10-17T10:41:11.169         55.6 MiB        84.2 MiB       12.5
+2026-10-17T10:42:49.047         55.9 MiB        85.2 MiB       54.3
+
+global GCs: 8   scavenges: 354 (800 ms total)
+live set: first 30.5 MiB → last 55.9 MiB (Δ +25.4 MiB), peak 55.9 MiB; rose in 6 of 7 intervals
+first-quarter mean 42.5 MiB → last-quarter mean 55.8 MiB; 0 global GCs freed < 5% of the heap
+max heap (-Xmx): 384.0 MiB; live set peaked at 15% of it
+VERDICT: slight rise (+13.3 MiB, 3% of max heap) — not conclusive; collect a longer window

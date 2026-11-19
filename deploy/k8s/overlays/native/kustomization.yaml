@@ -1,0 +1,34 @@
+# Scenario D · native — everything the JVM can cap is capped (heap 50 %, direct 64 MiB), but the leak is native
+# (Unsafe / FFM / JNI style), which no JVM flag bounds.
+# The guardian captures a VM report with NMT (OpenJ9: javacore, NATIVEMEMINFO) + heap dump at 88% before the kill.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+nameSuffix: -native
+labels:
+  - pairs:
+      leaklab.io/scenario: native
+    includeSelectors: true
+patches:
+  - target: { kind: Deployment, name: leaklab }
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: leaklab
+      spec:
+        template:
+          spec:
+            containers:
+              - name: leaklab
+                env:
+                  - name: LEAKLAB_SCENARIO
+                    value: native
+                  - name: JAVA_OPTS
+                    value: -XX:MaxRAMPercentage=50 -XX:MaxDirectMemorySize=64m
+                  - name: LEAKLAB_GUARDIAN_THRESHOLD
+                    value: "0.88"
+                resources:
+                  requests: { cpu: 500m, memory: 768Mi }
+                  limits: { memory: 768Mi }

@@ -1,0 +1,7 @@
+# MAT> oql "SELECT s, s.@usedHeapSize, s.@retainedHeapSize FROM io.leaklab.load.LoadEngine s"
+
+s                                         | s.@usedHeapSize | s.@retainedHeapSize
+----------------------------------------------------------------------------------
+io.leaklab.load.LoadEngine [id=0xe836a2e8]|              64 |          25,165,976
+Total: 1 entry                            |                 |                    
+----------------------------------------------------------------------------------

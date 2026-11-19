@@ -1,0 +1,56 @@
+# Lab only: these routes expose unauthenticated control and dump-download endpoints.
+# Restrict with an IP allowlist annotation, or use `oc port-forward` instead.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: leaklab-sized
+  annotations:
+    haproxy.router.openshift.io/timeout: 10m   # SSE stream + large dump downloads
+spec:
+  to: { kind: Service, name: leaklab-sized }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: leaklab-overcommit
+  annotations:
+    haproxy.router.openshift.io/timeout: 10m
+spec:
+  to: { kind: Service, name: leaklab-overcommit }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: leaklab-native
+  annotations:
+    haproxy.router.openshift.io/timeout: 10m
+spec:
+  to: { kind: Service, name: leaklab-native }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: leaklab-greedy
+  annotations:
+    haproxy.router.openshift.io/timeout: 10m
+spec:
+  to: { kind: Service, name: leaklab-greedy }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: leaklab-g1
+  annotations:
+    haproxy.router.openshift.io/timeout: 10m
+spec:
+  to: { kind: Service, name: leaklab-g1 }
+  port: { targetPort: http }
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }

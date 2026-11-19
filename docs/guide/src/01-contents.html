@@ -1,0 +1,325 @@
+<section class="chapter" style="break-before: auto">
+  <div class="kicker">Contents</div>
+  <h1>What's inside</h1>
+  <nav class="toc">
+    <ol>
+      <li><a href="#orientation"><span>0</span>Orientation</a>
+        <ol>
+          <li><a href="#how-to-read">How to read this guide</a></li>
+          <li><a href="#big-picture">The big picture on one page</a></li>
+          <li><a href="#analogy">The one analogy you need</a></li>
+          <li><a href="#four-scenarios">The four scenarios at a glance</a></li>
+        </ol></li>
+      <li><a href="#foundations"><span>1</span>Foundations: the ten ideas everything rests on</a>
+        <ol>
+          <li><a href="#f-memory">1.1 Process memory: reserved, committed, resident</a></li>
+          <li><a href="#f-containers">1.2 Containers, cgroups and the OOM killer</a></li>
+          <li><a href="#f-jvm">1.3 The JVM, OpenJ9 and IBM Semeru</a></li>
+          <li><a href="#f-areas">1.4 Where a JVM keeps things</a></li>
+          <li><a href="#f-gc">1.5 Garbage collection and the live set</a></li>
+          <li><a href="#f-leak">1.6 What a "leak" means in Java</a></li>
+          <li><a href="#f-oom">1.7 OutOfMemoryError</a></li>
+          <li><a href="#f-artefacts">1.8 Diagnostic artefacts and dump agents</a></li>
+          <li><a href="#f-analysis">1.9 Reading a heap: retained size, dominators, GC roots</a></li>
+          <li><a href="#f-platform">1.10 Quarkus, Kubernetes and OpenShift</a></li>
+        </ol></li>
+      <li><a href="#lab"><span>2</span>The lab: components, flows and start-up</a>
+        <ol>
+          <li><a href="#lab-components">2.1 Components and their roles</a></li>
+          <li><a href="#lab-flows">2.2 Request, telemetry and evidence flows</a></li>
+          <li><a href="#lab-startup">2.3 From <code>docker compose up</code> to a live dashboard</a></li>
+          <li><a href="#lab-ui">2.4 Reading the control room</a></li>
+        </ol></li>
+      <li><a href="#scenario-a"><span>A</span>Scenario A · <i>sized</i>: the good failure</a>
+        <ol>
+          <li><a href="#a1">A1 Configuration and verdict</a></li>
+          <li><a href="#a2">A2 Healthy churn</a></li>
+          <li><a href="#a3">A3 The leak begins</a></li>
+          <li><a href="#a4">A4 Recognising the trend</a></li>
+          <li><a href="#a5">A5 Taking heap dumps</a></li>
+          <li><a href="#a6">A6 Finding the suspect in MAT</a></li>
+          <li><a href="#a7">A7 Driving it into OutOfMemoryError</a></li>
+          <li><a href="#a8">A8 What the dump agents did</a></li>
+          <li><a href="#a9">A9 Recovery, and why production should not recover</a></li>
+          <li><a href="#a10">A10 Variant: the direct-buffer leak</a></li>
+        </ol></li>
+      <li><a href="#scenario-b"><span>B</span>Scenario B · <i>overcommit</i>: the silent kill</a>
+        <ol>
+          <li><a href="#b1">B1 Configuration and verdict</a></li>
+          <li><a href="#b2">B2 The heap grows freely</a></li>
+          <li><a href="#b3">B3 The container approaches its limit</a></li>
+          <li><a href="#b4">B4 The kernel's OOM killer acts</a></li>
+          <li><a href="#b5">B5 The aftermath: what remains</a></li>
+          <li><a href="#b6">B6 The same death on Kubernetes / OpenShift</a></li>
+          <li><a href="#b7">B7 Proving it was an OOMKill</a></li>
+          <li><a href="#b8">B8 Fixing it</a></li>
+        </ol></li>
+      <li><a href="#scenario-c"><span>C</span>Scenario C · <i>greedy</i>: the percentage trap</a>
+        <ol>
+          <li><a href="#c1">C1 Configuration and verdict</a></li>
+          <li><a href="#c2">C2 The JVM did read the limit</a></li>
+          <li><a href="#c3">C3 The direct-buffer leak</a></li>
+          <li><a href="#c4">C4 Why no OutOfMemoryError</a></li>
+          <li><a href="#c5">C5 Variant: the heap leak, a knife edge</a></li>
+          <li><a href="#c6">C6 RSS vs. working set</a></li>
+          <li><a href="#c7">C7 Other ways a percentage overcommits</a></li>
+          <li><a href="#c8">C8 Fixing and checking</a></li>
+        </ol></li>
+      <li><a href="#scenario-d"><span>D</span>Scenario D · <i>native</i>: the leak the heap can't see</a>
+        <ol>
+          <li><a href="#d1">D1 Configuration and verdict</a></li>
+          <li><a href="#d2">D2 Native allocation through FFM</a></li>
+          <li><a href="#d3">D3 What each instrument shows</a></li>
+          <li><a href="#d4">D4 The guardian fires</a></li>
+          <li><a href="#d5">D5 The kill</a></li>
+          <li><a href="#d6">D6 Analysis: the clean heap dump and NATIVEMEMINFO</a></li>
+        </ol></li>
+      <li><a href="#analysis"><span>E</span>The analysis stage: tools in action</a>
+        <ol>
+          <li><a href="#e0">E0 The workbench</a></li>
+          <li><a href="#e2">E2 GC trend</a></li>
+          <li><a href="#e3">E3 Leak Suspects</a></li>
+          <li><a href="#e5">E5 Histogram delta</a></li>
+          <li><a href="#e6">E6 Dominator tree</a></li>
+          <li><a href="#e7">E7 Immediate dominators</a></li>
+          <li><a href="#e9">E9 Path to GC roots</a></li>
+          <li><a href="#e11">E11 When the tool points the wrong way</a></li>
+        </ol></li>
+      <li><a href="#platforms"><span>6</span>Platforms: Docker, Kubernetes and OpenShift side by side</a></li>
+      <li><a href="#playbook"><span>7</span>The architect's playbook</a>
+        <ol>
+          <li><a href="#readiness-matrix">7.5 Forensics readiness matrix</a></li>
+          <li><a href="#a-ready">A · readiness</a> · <a href="#b-ready">B</a> · <a href="#c-ready">C</a> · <a href="#d-ready">D</a></li>
+        </ol></li>
+      <li><a href="#glossary"><span>A</span>Appendix A · Glossary (technical and plain language)</a></li>
+      <li><a href="#commands"><span>B</span>Appendix B · Command cheat sheet</a></li>
+      <li><a href="#hotspot"><span>C</span>Appendix C · The same lab on HotSpot, and on Java 17 and 21</a></li>
+    </ol>
+  </nav>
+</section>
+
+<section class="part" id="orientation">
+  <div class="num">0</div>
+  <div class="kicker">Part 0</div>
+  <h1>Orientation</h1>
+  <div class="bar"></div>
+  <p class="lead">Read this part first: how the guide works, the whole story on one page, and an everyday analogy that the
+    rest of the guide uses consistently.</p>
+</section>
+
+<section id="how-to-read">
+  <h2>How to read this guide</h2>
+  <p>Every concept and every step uses the same building blocks. Once you know the colours, you can skim for what
+    you need: the blue boxes for precision, the amber ones for intuition, and the violet ones for design decisions.</p>
+  <div class="legend-grid">
+    <div class="box tech"><div class="label">Technically</div><p>The precise version, in the vocabulary used by
+      vendor docs, tooling and senior engineers. This is what you would say in a design review.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The same idea told with a simple everyday story,
+      so the mechanism sticks. It deliberately simplifies.</p></div>
+    <div class="box why"><div class="label">Why / purpose</div><p>Why the step exists and what it achieves: its purpose
+      in the mechanism or in the investigation.</p></div>
+    <div class="box arch"><div class="label">Architect's note</div><p>What this means for designing, sizing, operating
+      or governing systems. These notes connect the mechanics back to your day job.</p></div>
+    <div class="box lab"><div class="label">In the lab</div><p>Real commands and <b>real output captured from LeakLab
+      runs</b> on IBM Semeru 25.0.4 (OpenJ9) in Docker, started with <code>--env-file semeru-25.env</code>. Nothing
+      here is invented. LeakLab's default JVM is the Red Hat build of OpenJDK 21 (HotSpot); Appendix C covers it and
+      the other HotSpot builds.</p></div>
+    <div class="box warn"><div class="label">Pitfall</div><p>Mistakes that commonly lead to wrong conclusions, lost
+      evidence or outages.</p></div>
+  </div>
+  <p>Most steps also have a <b>cast table</b> listing the components involved, what each one represents in the real
+    world, and what role it plays in that step.</p>
+  <table class="cast"><caption>Example cast table</caption>
+    <thead><tr><th>Component</th><th>Represents</th><th>Role in this step</th></tr></thead>
+    <tbody><tr><td>Linux kernel</td><td>The operating system's core</td><td>Enforces the container's memory limit</td></tr></tbody>
+  </table>
+  <h3>Suggested reading paths</h3>
+  <table>
+    <thead><tr><th>If you have…</th><th>Read</th></tr></thead>
+    <tbody>
+      <tr><td>20 minutes</td><td>Part 0, then the <a href="#playbook">architect's playbook</a> (Part 7).</td></tr>
+      <tr><td>2 hours</td><td>Parts 0 and 1, then Scenarios B and C (the two silent kills, explicit and implicit), then A and D.</td></tr>
+      <tr><td>A day, with the lab running</td><td>Everything in order. Do each <i>In the lab</i> box as you reach it,
+        with the LeakLab UI open next to the guide.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="big-picture" class="pb">
+  <h2>The big picture on one page</h2>
+  <p>A Java service in a container lives inside <b>two memory budgets, enforced by two different parties</b>.
+    Nearly everything in this guide follows from that one fact.</p>
+  <figure>
+    <svg viewBox="0 0 700 330" xmlns="http://www.w3.org/2000/svg">
+      <rect x="4" y="4" width="692" height="322" rx="14" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2"/>
+      <text x="20" y="26" font-size="12" font-weight="700" fill="#475569" letter-spacing="1">NODE · a Linux machine (in Docker Desktop: a small VM)</text>
+      <rect x="20" y="40" width="660" height="272" rx="12" fill="#fff1f3" stroke="#e11d48" stroke-width="2" stroke-dasharray="7 4"/>
+      <text x="36" y="62" font-size="12" font-weight="700" fill="#be123c" letter-spacing="1">CONTAINER · cgroup memory.max = the hard limit</text>
+      <text x="36" y="78" font-size="10.5" fill="#9f1239">Budget #1 · owner: the Linux kernel · penalty: SIGKILL (exit 137, "OOMKilled"), no evidence</text>
+      <rect x="36" y="92" width="470" height="204" rx="10" fill="#eff6ff" stroke="#0369a1" stroke-width="1.6"/>
+      <text x="52" y="112" font-size="12" font-weight="700" fill="#0b3b66" letter-spacing="1">JVM PROCESS (PID 1 in the container)</text>
+      <text x="52" y="128" font-size="10.5" fill="#0b3b66">Budget #2 · owner: the JVM · penalty: OutOfMemoryError, dumps written</text>
+      <rect x="52" y="140" width="250" height="142" rx="8" fill="#0ea5e9"/>
+      <text x="66" y="162" font-size="13" font-weight="700" fill="#fff">Java heap (-Xmx)</text>
+      <rect x="66" y="172" width="104" height="96" rx="6" fill="#bae6fd"/>
+      <text x="118" y="196" font-size="10" text-anchor="middle" fill="#0c4a6e" font-weight="700">nursery</text>
+      <text x="118" y="212" font-size="9" text-anchor="middle" fill="#0c4a6e">new objects</text>
+      <text x="118" y="226" font-size="9" text-anchor="middle" fill="#0c4a6e">scavenged often</text>
+      <rect x="178" y="172" width="112" height="96" rx="6" fill="#e0f2fe"/>
+      <text x="234" y="196" font-size="10" text-anchor="middle" fill="#0c4a6e" font-weight="700">tenured</text>
+      <text x="234" y="212" font-size="9" text-anchor="middle" fill="#0c4a6e">long-lived objects</text>
+      <text x="234" y="226" font-size="9" text-anchor="middle" fill="#0c4a6e">the leak piles up here</text>
+      <rect x="312" y="140" width="88" height="142" rx="8" fill="#8b5cf6"/>
+      <text x="356" y="196" font-size="11" text-anchor="middle" fill="#fff" font-weight="700">non-heap</text>
+      <text x="356" y="212" font-size="9" text-anchor="middle" fill="#ede9fe">class storage</text>
+      <text x="356" y="225" font-size="9" text-anchor="middle" fill="#ede9fe">JIT code/data</text>
+      <text x="356" y="238" font-size="9" text-anchor="middle" fill="#ede9fe">thread stacks</text>
+      <rect x="408" y="140" width="86" height="142" rx="8" fill="#f59e0b"/>
+      <text x="451" y="196" font-size="11" text-anchor="middle" fill="#fff" font-weight="700">direct</text>
+      <text x="451" y="212" font-size="9" text-anchor="middle" fill="#fff7ed">NIO buffers</text>
+      <text x="451" y="225" font-size="9" text-anchor="middle" fill="#fff7ed">capped by</text>
+      <text x="451" y="238" font-size="8.5" text-anchor="middle" fill="#fff7ed">MaxDirect-</text>
+      <text x="451" y="250" font-size="8.5" text-anchor="middle" fill="#fff7ed">MemorySize</text>
+      <rect x="520" y="92" width="146" height="204" rx="10" fill="#ec4899"/>
+      <text x="593" y="160" font-size="12" text-anchor="middle" fill="#fff" font-weight="700">native</text>
+      <text x="593" y="178" font-size="9.5" text-anchor="middle" fill="#fce7f3">FFM / Unsafe / JNI</text>
+      <text x="593" y="192" font-size="9.5" text-anchor="middle" fill="#fce7f3">malloc arenas</text>
+      <text x="593" y="216" font-size="9.5" text-anchor="middle" fill="#fff" font-weight="700">no JVM limit at all</text>
+      <text x="593" y="232" font-size="9.5" text-anchor="middle" fill="#fce7f3">only the kernel</text>
+      <text x="593" y="246" font-size="9.5" text-anchor="middle" fill="#fce7f3">stops it</text>
+    </svg>
+    <figcaption><b>Figure 0.1</b> Two nested budgets. The JVM only polices the blue box. The kernel polices the red one.
+      If what the JVM is <i>allowed</i> to use exceeds what the kernel <i>will give</i>, the kernel wins, and it does not
+      write a report.</figcaption>
+  </figure>
+  <div class="two">
+    <div class="box tech"><div class="label">Technically</div>
+      <p>The JVM enforces <code>-Xmx</code> (heap) and <code>-XX:MaxDirectMemorySize</code> (direct buffers). Crossing either
+        produces a <code>java.lang.OutOfMemoryError</code>. That is a <i>controlled</i> failure: diagnostic dump agents
+        run and the process can keep going or exit cleanly.</p>
+      <p>The kernel enforces the cgroup's <code>memory.max</code> on <b>everything</b> the process has resident: heap,
+        non-heap, direct, native and some kernel memory. When a page fault would cross the limit and reclaim fails, the
+        memory-cgroup OOM killer sends <code>SIGKILL</code>. That is an <i>uncontrolled</i> failure. The process cannot
+        react to it.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div>
+      <p>The JVM is a tidy tenant who keeps a strict rule for their own storage room: "never more than this many boxes."
+        If the storage room fills up, they stop, write a neat note explaining what's in it, and ask for help.</p>
+      <p>The kernel is the landlord, and the apartment has a fixed size. If the tenant's stuff, storage room <i>and</i>
+        furniture together, no longer fits, the landlord doesn't knock. They change the locks and throw everything
+        out, notes included.</p></div>
+  </div>
+  <div class="box arch"><div class="label">Architect's note</div>
+    <p>The design goal is simple to say: <b>make the JVM hit its own limit before the kernel hits the container's</b>.
+      Then failures are diagnosable. In practice that means
+      <code>heap ceiling + non-heap footprint + headroom &lt; container limit</code>, with every native consumer capped
+      or measured. Part 7 turns this into a checklist.</p></div>
+</section>
+
+<section id="analogy">
+  <h2>The one analogy you need</h2>
+  <p>Every "like I'm five" box in this guide uses the same story. Learn the cast once, and every later explanation
+    becomes a short sentence.</p>
+  <table>
+    <thead><tr><th style="width:24%">Real thing</th><th style="width:30%">In the story</th><th>Why the mapping holds</th></tr></thead>
+    <tbody>
+      <tr><td>Node / host</td><td>The apartment building</td><td>Shared physical resources split among tenants</td></tr>
+      <tr><td>Container + cgroup limit</td><td>Your apartment, with a fixed floor area</td><td>A hard space budget enforced from outside</td></tr>
+      <tr><td>Linux kernel</td><td>The landlord</td><td>Owns the building and enforces the floor area. Evicts without notice</td></tr>
+      <tr><td>JVM</td><td>A meticulous tenant</td><td>Organises everything inside; has their own house rules</td></tr>
+      <tr><td>Java heap</td><td>The tenant's storage room full of labelled boxes</td><td>Where all working "stuff" (objects) lives</td></tr>
+      <tr><td><code>-Xmx</code></td><td>The storage-room size the tenant <i>believes</i> they may use</td><td>A self-imposed rule. The landlord never sees it</td></tr>
+      <tr><td>Non-heap, native memory</td><td>Furniture, kitchen and bed: things outside the storage room</td><td>Takes floor space too, but isn't counted in the storage rule</td></tr>
+      <tr><td>Object</td><td>A box</td><td>Holds data. Boxes can contain notes pointing to other boxes</td></tr>
+      <tr><td>Reference</td><td>A string tied from one box to another</td><td>"This box needs that box"</td></tr>
+      <tr><td>GC root</td><td>A hook on the wall that a string is tied to</td><td>Anything hanging from a hook, directly or through other boxes, must be kept</td></tr>
+      <tr><td>Garbage collector</td><td>The cleaner</td><td>Follows every string from the hooks, then throws away all boxes not connected to any</td></tr>
+      <tr><td>Memory leak</td><td>A box tied to a hook that keeps getting new boxes tied to it, and no one ever unties any</td><td>The cleaner is <i>not allowed</i> to throw those away</td></tr>
+      <tr><td>OutOfMemoryError</td><td>The tenant noticing the storage room is full and calmly reporting it</td><td>Controlled. The tenant can still write notes</td></tr>
+      <tr><td>OOMKill (SIGKILL)</td><td>Eviction by the landlord</td><td>Instant. No chance to write anything</td></tr>
+      <tr><td>Heap dump</td><td>A photo inventory of every box and every string</td><td>Lets you see later who was holding what</td></tr>
+      <tr><td>javacore</td><td>A written status report: who in the household is doing what, and how much floor each room uses</td><td>Threads, locks and native memory by category</td></tr>
+      <tr><td>Verbose GC log</td><td>The cleaner's diary</td><td>After each clean-up: how full the room was before and after</td></tr>
+      <tr><td>Guardian (LeakLab)</td><td>A smoke alarm at 90 % full that takes the photos before the landlord arrives</td><td>Evidence captured while it's still possible</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="four-scenarios" class="pb">
+  <h2>The four scenarios at a glance</h2>
+  <p>LeakLab runs <b>one container image</b> four times, with different memory settings. The leaking code is identical.
+    Only the configuration changes, and with it the way the service dies and what evidence survives. The scenarios are
+    ordered by how hidden the cause is: from a JVM that catches its own leak, to a kill that no JVM flag could prevent.</p>
+  <figure>
+    <svg viewBox="0 0 940 262" xmlns="http://www.w3.org/2000/svg">
+      <defs><pattern id="hz" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#fff1f3"/><line x1="0" y1="0" x2="0" y2="8" stroke="#fda4af" stroke-width="3"/></pattern></defs>
+      <g transform="translate(0,0)">
+        <text x="10" y="18" font-size="15" font-weight="700" fill="#0b3b66">A · sized</text>
+        <rect x="10" y="28" width="210" height="42" fill="url(#hz)"/>
+        <line x1="10" y1="70" x2="220" y2="70" stroke="#e11d48" stroke-width="2"/><text x="218" y="64" font-size="12" fill="#e11d48" text-anchor="end">limit 1 GiB</text>
+        <line x1="10" y1="104" x2="220" y2="104" stroke="#334155" stroke-width="1.5" stroke-dasharray="5 3"/><text x="14" y="98" font-size="12" fill="#334155">-Xmx 614 MiB</text>
+        <path d="M10 205 L40 196 L45 202 L80 182 L85 192 L120 164 L125 176 L160 138 L165 152 L196 108 L200 108" fill="none" stroke="#0ea5e9" stroke-width="2.4"/>
+        <circle cx="200" cy="106" r="6" fill="#0f7a55"/><text x="188" y="128" font-size="12" fill="#0f7a55" text-anchor="end" font-weight="700">Java OOM</text>
+        <text x="10" y="232" font-size="12.5" fill="#334155">Heap hits its own ceiling.</text>
+        <text x="10" y="250" font-size="12.5" fill="#0f7a55" font-weight="700">Dumps written · JVM in control</text>
+      </g>
+      <g transform="translate(240,0)">
+        <text x="10" y="18" font-size="15" font-weight="700" fill="#0b3b66">B · overcommit</text>
+        <rect x="10" y="28" width="210" height="102" fill="url(#hz)"/>
+        <line x1="10" y1="62" x2="220" y2="62" stroke="#334155" stroke-width="1.5" stroke-dasharray="5 3"/><text x="218" y="56" font-size="12" fill="#334155" text-anchor="end">-Xmx 1 GiB</text>
+        <line x1="10" y1="130" x2="220" y2="130" stroke="#e11d48" stroke-width="2"/><text x="14" y="146" font-size="12" fill="#e11d48">limit 512 MiB</text>
+        <path d="M10 205 L50 192 L55 198 L95 175 L100 183 L140 154 L145 162 L176 132" fill="none" stroke="#0ea5e9" stroke-width="2.4"/>
+        <path d="M168 122 L184 138 M184 122 L168 138" stroke="#be123c" stroke-width="3"/><text x="176" y="112" font-size="12" fill="#be123c" text-anchor="middle" font-weight="700">SIGKILL</text>
+        <text x="10" y="232" font-size="12.5" fill="#334155">-Xmx alone exceeds the limit.</text>
+        <text x="10" y="250" font-size="12.5" fill="#be123c" font-weight="700">Exit 137 · no dumps</text>
+      </g>
+      <g transform="translate(480,0)">
+        <text x="10" y="18" font-size="15" font-weight="700" fill="#0b3b66">C · greedy</text>
+        <rect x="10" y="28" width="210" height="42" fill="url(#hz)"/>
+        <line x1="10" y1="70" x2="220" y2="70" stroke="#e11d48" stroke-width="2"/><text x="14" y="64" font-size="12" fill="#e11d48">limit 1 GiB</text>
+        <line x1="10" y1="78" x2="220" y2="78" stroke="#334155" stroke-width="1.5" stroke-dasharray="5 3"/><text x="14" y="94" font-size="12" fill="#334155">-Xmx 973 MiB (95 %)</text>
+        <path d="M10 200 L190 199" fill="none" stroke="#0ea5e9" stroke-width="2.4"/><text x="200" y="192" font-size="11" fill="#0369a1" text-anchor="end">heap: flat</text>
+        <path d="M10 197 L60 172 L110 140 L150 108 L176 80" fill="none" stroke="#ec4899" stroke-width="2.4"/><text x="104" y="176" font-size="11" fill="#be185d">direct buffers</text>
+        <path d="M168 62 L184 78 M184 62 L168 78" stroke="#be123c" stroke-width="3"/>
+        <text x="10" y="232" font-size="12.5" fill="#334155">Heap fits; off-heap has no room.</text>
+        <text x="10" y="250" font-size="12.5" fill="#be123c" font-weight="700">Exit 137 · no Java OOM</text>
+      </g>
+      <g transform="translate(720,0)">
+        <text x="10" y="18" font-size="15" font-weight="700" fill="#0b3b66">D · native</text>
+        <rect x="10" y="28" width="210" height="56" fill="url(#hz)"/>
+        <line x1="10" y1="84" x2="220" y2="84" stroke="#e11d48" stroke-width="2"/><text x="14" y="78" font-size="12" fill="#e11d48">limit 768 MiB</text>
+        <line x1="10" y1="96" x2="220" y2="96" stroke="#f59e0b" stroke-width="1.2" stroke-dasharray="2 2"/><text x="14" y="110" font-size="11" fill="#b45309">guardian 88 %</text>
+        <line x1="10" y1="150" x2="220" y2="150" stroke="#334155" stroke-width="1.5" stroke-dasharray="5 3"/><text x="218" y="144" font-size="12" fill="#334155" text-anchor="end">-Xmx 384 MiB</text>
+        <path d="M10 200 L190 199" fill="none" stroke="#0ea5e9" stroke-width="2.4"/><text x="100" y="193" font-size="11" fill="#0369a1" text-anchor="middle">heap: flat</text>
+        <path d="M10 196 L60 176 L110 148 L150 116 L170 98 L186 86" fill="none" stroke="#ec4899" stroke-width="2.4"/>
+        <circle cx="170" cy="97" r="4.5" fill="#f59e0b"/>
+        <path d="M178 78 L194 94 M194 78 L178 94" stroke="#be123c" stroke-width="3"/>
+        <text x="10" y="232" font-size="12.5" fill="#334155">Native grows; nothing caps it.</text>
+        <text x="10" y="250" font-size="12.5" fill="#b45309" font-weight="700">Guardian evidence · exit 137</text>
+      </g>
+    </svg>
+    <figcaption><b>Figure 0.2</b> Blue = Java heap, pink = memory outside the heap, dashed = <code>-Xmx</code>, red =
+      container limit, hatched = beyond the limit (the "kill zone"). The order in which a line meets a ceiling decides
+      the outcome.</figcaption>
+  </figure>
+  <table>
+    <thead><tr><th style="width:13%">Scenario</th><th style="width:10%">Container limit</th><th style="width:31%">JVM setting</th><th style="width:10%">Leak target</th><th>Observed outcome (Semeru, real run)</th></tr></thead>
+    <tbody>
+      <tr><td>A · sized<br><span class="small">port 8080</span></td><td>1 GiB</td><td><code>MaxRAMPercentage=60</code> → heap 614 MiB<br><code>MaxDirectMemorySize=96m</code></td><td>Heap</td><td><span class="pill ok">Java OOM</span> after ~31 s at 20 MiB/s. PHDs, javacores and snap traces written. Process survived.</td></tr>
+      <tr><td>B · overcommit<br><span class="small">port 8081</span></td><td>512 MiB</td><td><code>-Xmx1g</code>: an <b>explicit</b> overcommit</td><td>Heap</td><td><span class="pill bad">OOMKilled</span> exit 137 after ~21 s. Zero dumps. Heap was only ~50 % of <code>-Xmx</code>.</td></tr>
+      <tr><td>C · greedy<br><span class="small">port 8082</span></td><td>1 GiB</td><td><code>MaxRAMPercentage=95</code> → heap 973 MiB, direct memory uncapped: an <b>implicit</b> overcommit</td><td>Direct (heap: a variant)</td><td><span class="pill bad">OOMKilled</span> after ~40 s, with no <code>-Xmx</code> anywhere. The heap stayed flat at ~58 MiB while direct buffers reached ~850 MB. Guardian evidence at 92 % first. Same on Oracle and Temurin.</td></tr>
+      <tr><td>D · native<br><span class="small">port 8083</span></td><td>768 MiB</td><td><code>MaxRAMPercentage=50</code> → heap 384 MiB<br><code>MaxDirectMemorySize=64m</code></td><td>Native (FFM)</td><td><span class="pill mid">Guardian, then OOMKilled</span> after ~169 s. A javacore (85 ms) and PHD (195 ms) captured at 88 %, although heap and direct memory are capped.</td></tr>
+      <tr><td>G · g1<br><span class="small">port 8085</span></td><td>1 GiB</td><td><code>MaxRAMPercentage=80</code> → heap 819 MiB, <code>-XX:+UseG1GC</code>, <code>G1ReservePercent=10</code> (OpenJ9 ignores both)</td><td>Heap</td><td><span class="pill ok">Java OOM</span> after ~45 s, dumps written. A common production setting; its direct-buffer leak is a coin toss across JVMs (Appendix C).</td></tr>
+    </tbody>
+  </table>
+  <div class="box why"><div class="label">Why four scenarios</div>
+    <p>Together they cover the four answers to "why did my Java container die of memory?": (A) the application leaked
+      and the JVM caught it; (B) the configuration put the heap ceiling above the container limit, visible in one flag;
+      (C) the heap fits, but the JVM's <i>other</i> memory has no room, because a percentage sizes only the heap and
+      direct buffers default to a cap the size of the heap; (D) the leak is in memory that no JVM flag can bound. Each
+      needs different evidence and a different fix, so recognising which one you are in is the first diagnostic skill.</p></div>
+  <div class="box lab"><div class="label">And one for your own numbers: M · manual (port 8084)</div>
+    <p>A fifth service runs the same image with the limit, CPUs and <code>JAVA_OPTS</code> you give it, by default
+      1 GiB and <code>MaxRAMPercentage=75</code>, on the JVM and Java version of the env file you pass. It is what a
+      plain <code>docker compose up</code> starts; <code>--profile all</code> starts A–D and G. The verdict banner says before
+      any load which of the four you have built. Commands in Appendix B.</p></div>
+</section>

@@ -1,0 +1,22 @@
+Evidence in /dumps/sized  (newest first)
+
+Heap dumps (8):
+       2816037  2026-10-17T10:43:17  /dumps/sized/heapdump.sized.20261017.104316.1.phd
+       2677022  2026-10-17T10:41:16  /dumps/sized/heapdump.sized.20261017.104116.1.phd
+       3392914  2026-10-17T10:04:07  /dumps/sized/heapdump.20261017.100407.1.0005.phd
+       2752955  2026-10-17T10:04:07  /dumps/sized/heapdump.20261017.100401.1.0002.phd
+       2833343  2026-10-17T09:57:57  /dumps/sized/heapdump.20261017.095756.1.0008.phd
+       2833271  2026-10-17T09:57:57  /dumps/sized/heapdump.20261017.095757.1.0009.phd
+       2829374  2026-10-17T09:57:56  /dumps/sized/heapdump.20261017.095756.1.0005.phd
+       2838134  2026-10-17T09:57:56  /dumps/sized/heapdump.20261017.095749.1.0002.phd
+Javacores (6):
+       1014283  2026-10-17T10:04:07  /dumps/sized/javacore.20261017.100407.1.0006.txt
+       1058145  2026-10-17T10:04:07  /dumps/sized/javacore.20261017.100401.1.0003.txt
+       1027944  2026-10-17T09:57:57  /dumps/sized/javacore.20261017.095756.1.0011.txt
+       1029282  2026-10-17T09:57:57  /dumps/sized/javacore.20261017.095757.1.0010.txt
+       1030066  2026-10-17T09:57:56  /dumps/sized/javacore.20261017.095756.1.0006.txt
+       1064734  2026-10-17T09:57:56  /dumps/sized/javacore.20261017.095749.1.0003.txt
+GC logs (3):
+       1586127  2026-10-17T12:02:29  /dumps/sized/verbosegc.1.003.log
+      20024119  2026-10-17T10:00:57  /dumps/sized/verbosegc.1.002.log
+        105581  2026-10-17T09:55:17  /dumps/sized/verbosegc.1.001.log

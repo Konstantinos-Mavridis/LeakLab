@@ -1,0 +1,33 @@
+# Scenario B · overcommit — an explicit overcommit, on purpose: -Xmx larger than the container limit.
+# A heap leak ends in SIGKILL from the kernel (reason OOMKilled, exit 137) — no OutOfMemoryError, no dumps.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+nameSuffix: -overcommit
+labels:
+  - pairs:
+      leaklab.io/scenario: overcommit
+    includeSelectors: true
+patches:
+  - target: { kind: Deployment, name: leaklab }
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: leaklab
+      spec:
+        template:
+          spec:
+            containers:
+              - name: leaklab
+                env:
+                  - name: LEAKLAB_SCENARIO
+                    value: overcommit
+                  - name: JAVA_OPTS
+                    value: -Xmx1g
+                  - name: LEAKLAB_GUARDIAN_ENABLED
+                    value: "false"
+                resources:
+                  requests: { cpu: 500m, memory: 512Mi }
+                  limits: { memory: 512Mi }

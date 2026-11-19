@@ -1,0 +1,17 @@
+# OpenShift monitoring ignores prometheus.io/* annotations: application metrics are only collected through a
+# ServiceMonitor, and only when user-workload monitoring is enabled (cluster-monitoring-config:
+# enableUserWorkload: true — a cluster-admin setting). Without this, there is no metrics history to investigate.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: leaklab
+  labels:
+    app.kubernetes.io/part-of: leaklab
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: leaklab      # matches every scenario Service, manual included when deployed
+  endpoints:
+    - port: http
+      path: /q/metrics
+      interval: 15s

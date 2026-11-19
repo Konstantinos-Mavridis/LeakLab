@@ -1,0 +1,14 @@
+Evidence in /dumps/native  (newest first)
+
+Heap dumps (2):
+       2867968  2026-10-17T10:42:49  /dumps/native/heapdump.native.20261017.104248.1.phd
+       2834211  2026-10-17T09:57:48  /dumps/native/heapdump.native.20261017.095748.1.phd
+Javacores (4):
+       1096929  2026-10-17T10:42:48  /dumps/native/javacore.native.20261017.104248.1.txt
+       1088125  2026-10-17T10:42:46  /dumps/native/javacore.native.20261017.104246.1.txt
+       1096668  2026-10-17T10:41:16  /dumps/native/javacore.native.20261017.104116.1.txt
+       1080193  2026-10-17T09:57:48  /dumps/native/javacore.native.20261017.095747.1.txt
+GC logs (3):
+       1109636  2026-10-17T10:42:59  /dumps/native/verbosegc.1.003.log
+        150177  2026-10-17T09:57:48  /dumps/native/verbosegc.1.002.log
+        105125  2026-10-17T09:55:17  /dumps/native/verbosegc.1.001.log

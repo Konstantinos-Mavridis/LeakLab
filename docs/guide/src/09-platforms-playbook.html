@@ -1,0 +1,205 @@
+<section class="part" id="platforms">
+  <div class="num">6</div>
+  <div class="kicker">Part 6</div>
+  <h1>Platforms: Docker, Kubernetes and OpenShift side by side</h1>
+  <div class="bar"></div>
+  <p class="lead">The mechanism is the same everywhere: a cgroup, a JVM and a volume. Only the vocabulary and the
+    tooling change. This part maps one to the other, then walks through the OpenShift deployment step by step.</p>
+</section>
+
+<section>
+  <h2>6.1 Concept map</h2>
+  <table>
+    <thead><tr><th style="width:22%">Concept</th><th style="width:24%">Docker Compose</th><th style="width:27%">Kubernetes</th><th>OpenShift adds</th></tr></thead>
+    <tbody>
+      <tr><td>Memory limit (<code>memory.max</code>)</td><td><code>mem_limit</code></td><td><code>resources.limits.memory</code></td><td>Same; LimitRange / quotas per project</td></tr>
+      <tr><td>Reservation for scheduling</td><td>(none)</td><td><code>resources.requests.memory</code></td><td>Same</td></tr>
+      <tr><td>Swap</td><td><code>memswap_limit</code></td><td>Off by default (node-level setting)</td><td>Same</td></tr>
+      <tr><td>Restart after death</td><td><code>restart:</code> (lab: <code>"no"</code>)</td><td><code>restartPolicy: Always</code> + backoff</td><td>Same</td></tr>
+      <tr><td>Evidence of the kill</td><td><code>State.OOMKilled</code>, <code>docker events</code></td><td><code>lastState.terminated.reason</code>, events</td><td>Console "Last state"; built-in monitoring alerts</td></tr>
+      <tr><td>Dump storage</td><td>Bind mount <code>./dumps/x</code></td><td>PersistentVolumeClaim</td><td>Storage classes (ODF, cloud disks)</td></tr>
+      <tr><td>Getting files out</td><td><code>docker cp</code>, bind mount</td><td><code>kubectl cp</code> (needs <code>tar</code>)</td><td><code>oc rsync</code>, <code>oc cp</code></td></tr>
+      <tr><td>Signal the JVM</td><td><code>docker exec … kill -QUIT 1</code></td><td><code>kubectl exec … kill -QUIT 1</code></td><td><code>oc exec</code></td></tr>
+      <tr><td>Image build</td><td><code>docker compose build</code></td><td>External CI</td><td><b>BuildConfig</b> (buildah in-cluster) + <b>ImageStream</b></td></tr>
+      <tr><td>External access</td><td><code>ports:</code></td><td>Service + Ingress / port-forward</td><td><b>Route</b> (edge TLS)</td></tr>
+      <tr><td>Runtime user</td><td>UID 1001 from the image</td><td><code>runAsNonRoot</code></td><td><b>Random UID</b>, group 0 (<code>restricted-v2</code> SCC)</td></tr>
+      <tr><td>Node kernel log</td><td>Docker Desktop VM</td><td>Node access</td><td><code>oc debug node/… -- chroot /host journalctl -k</code></td></tr>
+    </tbody>
+  </table>
+  <div class="box eli5"><div class="label">Like I'm five</div><p>Docker is one apartment that you manage yourself.
+    Kubernetes is a large building with a management office that rehouses evicted tenants automatically. OpenShift is
+    that building with a security desk, an in-house carpentry workshop (BuildConfig) and a reception with a guest
+    list (Routes).</p></div>
+
+  <h2>6.2 Deploying to OpenShift, step by step</h2>
+  <div class="step"><div class="step-head"><span class="step-no">P1</span><h3><code>oc new-project leaklab</code></h3></div>
+    <p><b>Technically</b>: creates a namespace with OpenShift's default RBAC, quotas and SCC bindings.
+      <b>ELI5</b>: renting a floor in the building for this experiment. <b>Why</b>: isolation and easy clean-up
+      (<code>oc delete project leaklab</code>).</p></div>
+  <div class="step"><div class="step-head"><span class="step-no">P2</span><h3><code>oc apply -k deploy/openshift</code></h3></div>
+    <p><b>Technically</b>: Kustomize renders the base Deployment, Service and PVC three times (overlays
+      <i>sized</i>, <i>overcommit</i>, <i>native</i>) with name suffixes, scenario labels in selectors, and per-scenario
+      env and limits. It adds the ImageStream, BuildConfig and three Routes, and patches each Deployment with an
+      ImageStream trigger and image-lookup annotation. <b>ELI5</b>: one set of blueprints, photocopied three times with
+      different room sizes written in. <b>Why</b>: one source of truth. The only differences between scenarios are the
+      ones you intend.</p></div>
+  <div class="step"><div class="step-head"><span class="step-no">P3</span><h3><code>oc start-build leaklab --from-dir=app --follow</code></h3></div>
+    <p><b>Technically</b>: uploads your working copy as a binary build input. buildah runs the multi-stage
+      Containerfile in a build pod, on the default UBI 9 runtime (the Red Hat build of OpenJDK 21), and pushes to the internal
+      registry as <code>leaklab:latest</code>. The ImageStream tag update triggers rollouts of all four Deployments.
+      <b>ELI5</b>: the building's own workshop builds the furniture from your drawings and delivers it to the four
+      apartments. <b>Why</b>: no external registry or CI needed. Note the 2 GiB limit on the build pod itself, since
+      Maven also needs memory.</p></div>
+  <div class="step"><div class="step-head"><span class="step-no">P4</span><h3>Pods start under <code>restricted-v2</code></h3></div>
+    <p><b>Technically</b>: the pod gets a random UID in the project's range with supplementary group 0. The
+      group-writable <code>/dumps</code> and <code>/deployments</code> make that work. The PVC is bound and mounted.
+      The startup probe gates the readiness and liveness probes. <code>terminationMessagePolicy: FallbackToLogsOnError</code>
+      is active. <b>ELI5</b>: the security desk gives each tenant a random badge number. The apartment has to let any
+      badge from the right "family" in.</p></div>
+  <div class="step"><div class="step-head"><span class="step-no">P5</span><h3>Run the scenarios through the Routes</h3></div>
+    <p><b>Technically</b>: the Routes terminate TLS at the edge, with a 10-minute HAProxy timeout for the SSE stream
+      and large downloads. After a kill, inspect with <code>oc get pod … lastState</code>, <code>oc logs --previous</code>
+      and <code>scripts/oomkill-forensics.sh k8s leaklab</code>, and copy dumps with
+      <code>scripts/collect-evidence.sh k8s leaklab deploy/leaklab-native</code>.</p></div>
+  <div class="box warn"><div class="label">Pitfall · QoS precision</div>
+    <p>The manifests set memory <code>requests == limits</code> but only a CPU <i>request</i>, so the pod's QoS class is
+      <b>Burstable</b>, not Guaranteed (Guaranteed needs requests = limits for <i>both</i> CPU and memory). Equal
+      memory request and limit still means the container never uses more memory than it reserved, which keeps it low
+      in the node-pressure eviction order. The kill you will see is the cgroup OOMKill at its own limit.</p></div>
+</section>
+
+<section class="part" id="playbook">
+  <div class="num">7</div>
+  <div class="kicker">Part 7</div>
+  <h1>The architect's playbook</h1>
+  <div class="bar"></div>
+  <p class="lead">Everything above, condensed into design rules, a sizing method, an observability baseline and an
+    incident decision tree. This is the part to take into your next design review.</p>
+</section>
+
+<section>
+  <h2>7.1 Ten design rules</h2>
+  <ol>
+    <li><b>The JVM fails first.</b> <code>heap ceiling + non-heap footprint + headroom &lt; container limit</code>, always.</li>
+    <li><b>Size by percentage, not by number.</b> <code>-XX:MaxRAMPercentage</code>, never a hard-coded <code>-Xmx</code> that can drift away from the limit.</li>
+    <li><b>Cap every capturable native consumer</b>: <code>MaxDirectMemorySize</code>, thread pools, <code>-Xss</code>, <code>MALLOC_ARENA_MAX</code>.</li>
+    <li><b>Memory request = memory limit</b> for JVM workloads: predictable placement, and no overcommit surprises.</li>
+    <li><b>Evidence by default</b>: dump directory on a PVC, OpenJ9 agents on, rotating GC log, a tested copy-out procedure.</li>
+    <li><b>Evidence before the limit</b>: guardian or alert-driven automation at ~85–90 % working set.</li>
+    <li><b>Fail fast after OOM</b>: <code>-XX:+ExitOnOutOfMemoryError</code> once the dumps are written.</li>
+    <li><b>Liveness never measures memory</b>, and tolerates GC and dump pauses.</li>
+    <li><b>Every cache states its bound and eviction policy</b> in code review. Unbounded maps fail review.</li>
+    <li><b>Dumps are sensitive data</b>: classification, access control, encryption, retention.</li>
+  </ol>
+
+  <h2>7.2 Sizing method</h2>
+  <div class="two">
+    <div class="box tech"><div class="label">Technically</div>
+      <ol>
+        <li>Run a soak test at peak load. Record the steady-state <b>live set</b> (after global GC) and the
+          <b>non-heap footprint</b> (RSS − heap committed).</li>
+        <li>Heap ceiling ≈ live set × 2–3, so the GC has room to work efficiently.</li>
+        <li>Limit ≈ heap ceiling + non-heap footprint × 1.3 + 10 % margin.</li>
+        <li>Express the heap as <code>MaxRAMPercentage = heap ÷ limit</code>.</li>
+        <li>Validate: the LeakLab-style verdict is <span class="pill ok">SIZED</span>; a forced heap leak in staging
+          ends in a Java OOM with dumps, not an OOMKill.</li>
+      </ol></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Measure how much stuff the household really
+      keeps, then give the storage room two or three times that so the cleaner has space to work. Add the furniture,
+      plus a bit extra, and that's the apartment size. Then test it: overfill the storage room on purpose and check
+      that the tenant raises the alarm before the landlord evicts them.</p></div>
+  </div>
+  <table>
+    <thead><tr><th>Container limit</th><th>Typical <code>MaxRAMPercentage</code></th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>≤ 1 GiB</td><td>50–60 %</td><td>Non-heap is a large share of small containers</td></tr>
+      <tr><td>1–4 GiB</td><td>60–70 %</td><td>Balanced</td></tr>
+      <tr><td>≥ 4 GiB</td><td>70–80 %</td><td>Non-heap grows slower than heap</td></tr>
+    </tbody>
+  </table>
+  <p class="small">Defaults if you set nothing: OpenJ9 uses 50 % of limits under 1 GiB, <i>limit − 512 MiB</i> between
+    1 and 2 GiB, and 75 % above 2 GiB. HotSpot uses 25 %.</p>
+
+  <h2>7.3 Observability baseline</h2>
+  <table>
+    <thead><tr><th style="width:20%">Signal</th><th style="width:52%">Source</th><th>Alert when</th></tr></thead>
+    <tbody>
+      <tr><td>Live set trend</td><td>GC log / <code>leaklab_heap_live_after_gc_bytes</code> or equivalent</td><td>Positive slope over hours under steady load</td></tr>
+      <tr><td>Working set vs. limit</td><td><code>container_memory_working_set_bytes</code> ÷ <code>kube_pod_container_resource_limits</code></td><td>&gt; 0.85–0.9</td></tr>
+      <tr><td>Native footprint</td><td>working set − <code>jvm_memory_used_bytes{area="heap"}</code></td><td>Sustained growth</td></tr>
+      <tr><td>OOMKills</td><td><code>kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}</code></td><td>Any</td></tr>
+      <tr><td>Kernel reclaim at limit</td><td><code>memory.events max</code> / <code>container_oom_events_total</code></td><td>Rising</td></tr>
+      <tr><td>GC overhead</td><td><code>jvm_gc_pause_seconds</code></td><td>&gt; 10 % of wall time</td></tr>
+    </tbody>
+  </table>
+
+  <h2>7.4 Incident decision tree</h2>
+  <figure>
+    <svg viewBox="0 0 700 318" xmlns="http://www.w3.org/2000/svg">
+      <defs><marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#475569"/></marker></defs>
+      <g font-size="9.5" text-anchor="middle">
+        <rect x="250" y="6" width="200" height="34" rx="6" fill="#0b3b66"/><text x="350" y="27" fill="#fff" font-weight="700">Pod restarted / service died</text>
+        <rect x="250" y="62" width="200" height="34" rx="6" fill="#fff" stroke="#475569"/><text x="350" y="83" font-weight="700">Termination reason?</text>
+        <rect x="10" y="122" width="160" height="40" rx="6" fill="#ecf8f2" stroke="#0f7a55"/><text x="90" y="139" font-weight="700">JVMDUMP055I / OOM</text><text x="90" y="153">in logs</text>
+        <rect x="190" y="122" width="150" height="40" rx="6" fill="#fff1f3" stroke="#be123c"/><text x="265" y="139" font-weight="700">OOMKilled · 137</text><text x="265" y="153">no JVM lines</text>
+        <rect x="360" y="122" width="150" height="40" rx="6" fill="#fff6e8" stroke="#a14f05"/><text x="435" y="139" font-weight="700">Error · 137</text><text x="435" y="153">probe failures</text>
+        <rect x="530" y="122" width="160" height="40" rx="6" fill="#f4f6fa" stroke="#64748b"/><text x="610" y="139" font-weight="700">Evicted</text><text x="610" y="153">node pressure</text>
+        <rect x="10" y="190" width="160" height="70" rx="6" fill="#fff" stroke="#0f7a55"/><text x="90" y="208" font-weight="700">Scenario A</text><text x="90" y="223">Runbook: dumps → MAT</text><text x="90" y="237">2-dump diff → code</text><text x="90" y="251">(or A10: direct cap)</text>
+        <rect x="190" y="190" width="150" height="122" rx="6" fill="#fff" stroke="#be123c"/><text x="265" y="208" font-weight="700">1 · Heap ceiling ≥ limit?</text><text x="265" y="222">yes → B: fix the heap size</text><text x="265" y="242" font-weight="700">2 · Heap + non-heap +</text><text x="265" y="255" font-weight="700">direct allowance &gt; limit?</text><text x="265" y="269">yes → C: cap direct, leave room</text><text x="265" y="289" font-weight="700">3 · Otherwise → D</text><text x="265" y="303">native leak: javacore / NMT diff</text>
+        <rect x="360" y="190" width="150" height="70" rx="6" fill="#fff" stroke="#a14f05"/><text x="435" y="208" font-weight="700">GC thrash / dump pause?</text><text x="435" y="223">check verbose GC log</text><text x="435" y="237">relax probe timeouts</text><text x="435" y="251">often a leak in disguise</text>
+        <rect x="530" y="190" width="160" height="70" rx="6" fill="#fff" stroke="#64748b"/><text x="610" y="208" font-weight="700">Node capacity issue</text><text x="610" y="223">requests vs. usage</text><text x="610" y="237">neighbours · QoS</text><text x="610" y="251">memory request = limit</text>
+      </g>
+      <path d="M350 40 L350 60 M350 96 L90 120 M350 96 L265 120 M350 96 L435 120 M350 96 L610 120 M90 162 L90 188 M265 162 L265 188 M435 162 L435 188 M610 162 L610 188" stroke="#475569" stroke-width="1.3" fill="none" marker-end="url(#a6)"/>
+    </svg>
+    <figcaption><b>Figure 7.1</b> From "it died" to the right runbook. For an OOMKill, the configuration checks run in the order of the scenarios: B, then C, and only then D. The control room's verdict does checks 1 and 2 for you.</figcaption>
+  </figure>
+</section>
+
+<section class="readiness" id="readiness-matrix">
+  <h2>7.5 Forensics readiness matrix: all scenarios at a glance</h2>
+  <p>This consolidates the readiness pages at the end of each scenario. Read it as a <b>platform standard</b>.
+    Everything marked <span class="tw start">start-up · restart</span> or <span class="tw build">image build</span> has
+    to be in the golden image and deployment template <i>before</i> the first incident. During an incident, the
+    restart needed to enable it destroys the evidence.</p>
+  <table class="ready matrix">
+    <thead><tr><th style="width:21%">Item</th><th style="width:8%">Default</th><th style="width:31%">Flag / config / tool</th><th style="width:16%">When / restart</th>
+      <th class="center" style="width:6%">A</th><th class="center" style="width:6%">B</th><th class="center" style="width:6%">C</th><th class="center" style="width:6%">D</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="8">Baked into the image</td></tr>
+      <tr><td>Writable dump dir (group 0)</td><td><span class="def off">off</span></td><td><code>chmod g=u /dumps</code></td><td><span class="tw build">image build</span></td><td class="center">●</td><td class="center">●</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr><td><code>tar</code> (copy-out), <code>procps</code>, a shell</td><td><span class="def var">varies</span></td><td>OS packages; a shell for <code>kubectl exec … kill</code></td><td><span class="tw build">image build</span></td><td class="center">●</td><td class="center">○</td><td class="center">○</td><td class="center">●</td></tr>
+      <tr><td>JVM <code>exec</code>'d as PID 1</td><td><span class="def var">varies</span></td><td><code>ENTRYPOINT … exec java</code></td><td><span class="tw build">image build</span></td><td class="center">●</td><td class="center">○</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr><td>Metrics instrumentation</td><td><span class="def off">off</span></td><td>Micrometer: heap, GC, direct buffers</td><td><span class="tw build">image build</span></td><td class="center">●</td><td class="center">○</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr class="group"><td colspan="8">JVM flags and pod spec (restart to change)</td></tr>
+      <tr><td>Dump directory on a volume</td><td><span class="def off">off</span></td><td><code>-Xdump:directory=/dumps</code> + PVC (default: working dir, container layer)</td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">○</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr><td>Volume writable by the runtime UID</td><td><span class="def off">off</span></td><td><code>securityContext.fsGroup</code> (automatic on OpenShift)</td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">○</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr><td>Writable <code>/tmp</code> (read-only root FS)</td><td><span class="def on">on</span></td><td><code>emptyDir</code> at <code>/tmp</code></td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">○</td><td class="center">○</td><td class="center">●</td></tr>
+      <tr><td>Heap dump on SIGQUIT</td><td><span class="def off">off</span></td><td><code>-Xdump:heap:events=user</code> (default SIGQUIT = javacore only)</td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">○</td><td class="center">○</td><td class="center">○</td></tr>
+      <tr><td>Dump on a library-thrown OOM</td><td><span class="def off">off</span></td><td><code>-Xdump:java+heap:events=throw,filter=java/lang/OutOfMemoryError,msg_filter=*direct*</code> (direct buffers; HotSpot: none)</td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">○</td><td class="center">○</td><td class="center">○</td></tr>
+      <tr><td>Verbose GC log, unique per start</td><td><span class="def off">off</span></td><td><code>-Xverbosegclog:…%Y%m%d.%H%M%S…</code> (off in both JVMs)</td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">●</td><td class="center">●</td><td class="center">○</td></tr>
+      <tr><td>Allocation call paths</td><td><span class="def off">off</span></td><td><code>-Xdump:stack:events=allocation,filter=#1m</code>; HotSpot JFR</td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">○</td><td class="center">○</td><td class="center">○</td></tr>
+      <tr><td>Heap inside the limit</td><td><span class="def var">varies</span></td><td><code>MaxRAMPercentage</code> from measured footprint</td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">●</td><td class="center">●</td><td class="center">○</td></tr>
+      <tr><td>Direct memory capped</td><td><span class="def off">off</span></td><td><code>-XX:MaxDirectMemorySize</code> (default ≈ max heap)</td><td><span class="tw start">start-up · restart</span></td><td class="center">○</td><td class="center">○</td><td class="center">●</td><td class="center">○</td></tr>
+      <tr><td>Fail fast on flag typos</td><td><span class="def off">off</span></td><td><code>-XX:-IgnoreUnrecognizedVMOptions -XX:-IgnoreUnrecognizedXXColonOptions</code></td><td><span class="tw start">start-up · restart</span></td><td class="center">○</td><td class="center">●</td><td class="center">●</td><td class="center">○</td></tr>
+      <tr><td>Exit after OOM</td><td><span class="def off">off</span></td><td><code>-XX:+ExitOnOutOfMemoryError</code></td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">○</td><td class="center">○</td><td class="center">○</td></tr>
+      <tr><td>Pre-kill capture</td><td><span class="def off">off</span></td><td>Guardian, sidecar or alert automation at ~90 %</td><td><span class="tw start">start-up · restart</span></td><td class="center">○</td><td class="center">●</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr><td>Probe tolerance, termination message</td><td><span class="def off">off</span></td><td>liveness timeouts (default 1 s × 3); <code>FallbackToLogsOnError</code> (default <code>File</code>)</td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">●</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr><td>HotSpot only: OOM dump, NMT</td><td><span class="def off">off</span></td><td><code>-XX:+HeapDumpOnOutOfMemoryError</code>, <code>-XX:NativeMemoryTracking=summary</code></td><td><span class="tw start">start-up · restart</span></td><td class="center">●</td><td class="center">○</td><td class="center">○</td><td class="center">●</td></tr>
+      <tr class="group"><td colspan="8">Available on the running JVM (no restart)</td></tr>
+      <tr><td>Dump on OutOfMemoryError (OpenJ9)</td><td><span class="def on">on</span></td><td>default agents: heapdump, javacore, snap, core</td><td><span class="tw live">runtime · no restart</span></td><td class="center">●</td><td class="center">○</td><td class="center">○</td><td class="center">○</td></tr>
+      <tr><td>javacore (threads, cgroup, NATIVEMEMINFO)</td><td><span class="def on">on</span></td><td><code>kill -QUIT 1</code>; Docker: <code>docker kill -s QUIT</code></td><td><span class="tw live">runtime · no restart</span></td><td class="center">●</td><td class="center">●</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr><td>Effective options and heap ceiling</td><td><span class="def on">on</span></td><td>javacore <code>1CICMDLINE</code>, <code>2CIENVVAR</code>, <code>3CICGRPINFO</code>; <code>-verbose:sizes</code></td><td><span class="tw live">runtime · no restart</span></td><td class="center">○</td><td class="center">●</td><td class="center">●</td><td class="center">○</td></tr>
+      <tr><td>OS view of memory</td><td><span class="def on">on</span></td><td><code>/proc/1/status</code>, <code>smaps_rollup</code>; <code>kubectl debug --target</code></td><td><span class="tw live">runtime · no restart</span></td><td class="center">○</td><td class="center">○</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr class="group"><td colspan="8">Platform, set up beforehand</td></tr>
+      <tr><td>Metrics scraped, history and alerts</td><td><span class="def var">varies</span></td><td><code>ServiceMonitor</code> on OpenShift; working set / limit, live-set slope, OOMKilled reason</td><td><span class="tw platform">platform · beforehand</span></td><td class="center">●</td><td class="center">●</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr><td>Central log retention</td><td><span class="def off">off</span></td><td>OpenShift Logging / Loki / EFK (kubelet keeps ~10 MiB, one previous instance)</td><td><span class="tw platform">platform · beforehand</span></td><td class="center">●</td><td class="center">●</td><td class="center">●</td><td class="center">○</td></tr>
+      <tr><td>Diagnostics that don't allocate in the container</td><td><span class="def off">off</span></td><td>an exec'd <code>sh</code> or <code>jcmd</code> runs in the container's cgroup and can trigger the kill near the limit; read cgroup files from the node</td><td><span class="tw platform">platform · beforehand</span></td><td class="center">○</td><td class="center">●</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr><td>Node kernel log and access</td><td><span class="def on">on</span></td><td>journald retention; <code>oc debug node</code> rights</td><td><span class="tw platform">platform · beforehand</span></td><td class="center">○</td><td class="center">●</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr><td>Core dumps permitted</td><td><span class="def var">varies</span></td><td>node <code>core_pattern</code>, <code>ulimit -c</code>, disk</td><td><span class="tw platform">platform · beforehand</span></td><td class="center">○</td><td class="center">○</td><td class="center">○</td><td class="center">●</td></tr>
+      <tr><td>Dump data-handling policy</td><td><span class="def na">n/a</span></td><td>classification, encryption, access, retention</td><td><span class="tw platform">platform · beforehand</span></td><td class="center">●</td><td class="center">○</td><td class="center">●</td><td class="center">●</td></tr>
+      <tr class="group"><td colspan="8">After the fact</td></tr>
+      <tr><td>Analysis workbench</td><td><span class="def na">n/a</span></td><td>MAT + IBM DTFJ, gc-trend, nativemem-diff, forensics script</td><td><span class="tw after">after the fact</span></td><td class="center">●</td><td class="center">●</td><td class="center">●</td><td class="center">●</td></tr>
+    </tbody>
+  </table>
+  <p class="small">● essential for that scenario · ○ useful but not decisive. <b>Default</b> = what an unconfigured OpenJ9 container on Kubernetes gives you (verified on Semeru 25: no GC log at all; SIGQUIT writes a javacore only, into the working directory).</p>
+</section>

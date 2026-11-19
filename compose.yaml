@@ -1,0 +1,171 @@
+# LeakLab — one image, six memory configurations, on the JVM and Java version of your choice.
+#
+#   docker compose up --build                                        # M · manual on Red Hat 21, your sizing  :6184
+#   docker compose --env-file temurin-21.env up --build              # M · manual on Temurin 21               :7184
+#   docker compose --env-file temurin-21.env --env-file manual.env up   # … with the sizing in manual.env
+#   docker compose --profile all up --build                          # A–D and G on Red Hat 21      :6180–6183, 6185
+#   docker compose --env-file semeru-25.env --profile all up --build    # A–D and G on Semeru 25    :8080–8083, 8085
+#   docker compose --env-file oracle-21.env up --build sized         # one named scenario (any profile)       :9180
+#
+# Profiles: a plain `up` starts M (every env file, and .env, set COMPOSE_PROFILES=manual); `--profile all` replaces
+# that and starts A–D and G; naming services starts exactly those. Tear down the same way: `down` removes M,
+# `--profile all down` A–D and G, `--profile "*" down` everything.
+#
+# Twelve env files, <jvm>-<java version>.env: redhat, semeru, oracle, temurin × 17, 21, 25. Each names the variant:
+# stack leaklab-<jvm>-<version>, containers leaklab-<scenario>-<jvm>-<version>, image leaklab:1.0.0-<jvm>-<version>,
+# evidence in dumps/<jvm>-<version>/<scenario>. All twelve stacks can run side by side. Without --env-file, compose
+# reads .env and the defaults below: the Red Hat build of OpenJDK 21, the default JVM.
+# Ports: the first digit picks the JVM (6 Red Hat, 8 Semeru, 9 Oracle, 7 Temurin), the second the version (7 = 17,
+# 1 = 21, 0 = 25), the last the scenario. Red Hat 21 shown:
+#   A  http://localhost:6180  sized       heap leak    → Java OutOfMemoryError, dumps written   (the "good" failure)
+#   B  http://localhost:6181  overcommit  heap leak    → OOMKill, exit 137, no dumps            (explicit: -Xmx > limit)
+#   C  http://localhost:6182  greedy      direct leak  → OOMKill with only MaxRAMPercentage set (implicit: the trap)
+#   D  http://localhost:6183  native      native leak  → OOMKill, heap dump looks clean         (no JVM flag bounds it)
+#   M  http://localhost:6184  manual      your sizing  → whatever your numbers say              (the plain `up`)
+#   G  http://localhost:6185  g1          heap leak    → a common production setting: 80 %, G1, G1ReservePercent=10
+#
+# restart: "no" keeps the dead container around so `docker inspect` still shows State.OOMKilled.
+# memswap_limit == mem_limit disables swap: otherwise the container thrashes in swap instead of being killed.
+
+name: leaklab-${LEAKLAB_JVM_NAME:-redhat}-${LEAKLAB_JAVA_VERSION:-21}
+
+x-leaklab: &leaklab
+  image: leaklab:1.0.0-${LEAKLAB_JVM_NAME:-redhat}-${LEAKLAB_JAVA_VERSION:-21}
+  build:
+    context: ./app
+    dockerfile: Containerfile
+    args:
+      JVM: ${LEAKLAB_JVM:-hotspot}                    # VM family: hotspot | openj9
+      JAVA_VERSION: ${LEAKLAB_JAVA_VERSION:-21}       # Java feature release: 17 | 21 | 25 (the jar is compiled for it)
+      RUNTIME_IMAGE: ${LEAKLAB_OPENJ9_IMAGE:-ibm-semeru-runtimes:open-21-jre-noble}
+      HOTSPOT_IMAGE: ${LEAKLAB_HOTSPOT_IMAGE:-registry.access.redhat.com/ubi9/openjdk-21}
+  restart: "no"
+  stop_grace_period: 10s
+  cpus: 2
+
+services:
+
+  sized:
+    <<: *leaklab
+    profiles: ["all"]
+    container_name: leaklab-sized-${LEAKLAB_JVM_NAME:-redhat}-${LEAKLAB_JAVA_VERSION:-21}
+    ports: ["${LEAKLAB_PORT_PREFIX:-61}80:8080"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    environment:
+      LEAKLAB_SCENARIO: sized
+      # Heap = 60% of 1 GiB ≈ 614 MiB, leaving ~400 MiB for class storage, JIT, threads, direct buffers.
+      # Capping direct memory turns a direct-buffer leak into a diagnosable "OutOfMemoryError: Cannot reserve … direct
+      # buffer memory" (dumped by the image's events=throw agent: the default OOM agents don't fire for it).
+      JAVA_OPTS: "-XX:MaxRAMPercentage=60 -XX:MaxDirectMemorySize=96m"
+    volumes:
+      - ${LEAKLAB_DUMPS:-./dumps/redhat-21}/sized:/dumps
+
+  overcommit:
+    <<: *leaklab
+    profiles: ["all"]
+    container_name: leaklab-overcommit-${LEAKLAB_JVM_NAME:-redhat}-${LEAKLAB_JAVA_VERSION:-21}
+    ports: ["${LEAKLAB_PORT_PREFIX:-61}81:8080"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    environment:
+      LEAKLAB_SCENARIO: overcommit
+      # The classic misconfiguration: a hard-coded -Xmx copied from a VM, larger than the container.
+      JAVA_OPTS: "-Xmx1g"
+      # Guardian off on purpose: watch the container die with zero evidence. Flip to "true" to see the fix.
+      LEAKLAB_GUARDIAN_ENABLED: "false"
+    volumes:
+      - ${LEAKLAB_DUMPS:-./dumps/redhat-21}/overcommit:/dumps
+
+  # The analysis stage: an offline workbench (Semeru JDK + Eclipse MAT + IBM DTFJ) that never runs with the app.
+  #   docker compose --profile analysis run --rm analyzer                         # analyse ./dumps/redhat-21/sized
+  #   docker compose --profile analysis run --rm analyzer /dumps/oracle-21/native     # another variant / scenario folder
+  analyzer:
+    profiles: ["analysis"]
+    image: leaklab-analyzer:1.0.0
+    build:
+      context: ./analysis
+      dockerfile: Containerfile
+    mem_limit: 4g                       # MAT needs ~1–1.5x the dump's live heap; give the workbench room
+    volumes:
+      - ./dumps:/dumps:ro               # evidence is read-only: analysis never modifies the originals
+      - ./analysis/reports:/reports
+    command: ["/dumps/redhat-21/sized"]
+
+  # C · greedy — the percentage trap: an implicit overcommit. The heap fits, the JVM's other memory has no room.
+  greedy:
+    <<: *leaklab
+    profiles: ["all"]
+    container_name: leaklab-greedy-${LEAKLAB_JVM_NAME:-redhat}-${LEAKLAB_JAVA_VERSION:-21}
+    ports: ["${LEAKLAB_PORT_PREFIX:-61}82:8080"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    environment:
+      LEAKLAB_SCENARIO: greedy
+      # "Container-aware" sizing, no -Xmx anywhere — and still an OOMKill:
+      #   heap ceiling 95 % of 1 GiB ≈ 973 MiB, leaving ~51 MiB for everything else, and no MaxDirectMemorySize,
+      #   so direct buffers may grow to ≈ the max heap ON TOP of the heap. The leak target starts on Direct.
+      JAVA_OPTS: "-XX:MaxRAMPercentage=95"
+      LEAKLAB_LOAD_MODE: DIRECT
+    volumes:
+      - ${LEAKLAB_DUMPS:-./dumps/redhat-21}/greedy:/dumps
+
+  # D · native — the leak no JVM flag can bound.
+  native:
+    <<: *leaklab
+    profiles: ["all"]
+    container_name: leaklab-native-${LEAKLAB_JVM_NAME:-redhat}-${LEAKLAB_JAVA_VERSION:-21}
+    ports: ["${LEAKLAB_PORT_PREFIX:-61}83:8080"]
+    mem_limit: 768m
+    memswap_limit: 768m
+    environment:
+      LEAKLAB_SCENARIO: native
+      # Everything the JVM can cap is capped (heap 50 %, direct 64 MiB) — and a native leak still ends in an OOMKill.
+      JAVA_OPTS: "-XX:MaxRAMPercentage=50 -XX:MaxDirectMemorySize=64m"
+      LEAKLAB_GUARDIAN_THRESHOLD: "0.88"
+    volumes:
+      - ${LEAKLAB_DUMPS:-./dumps/redhat-21}/native:/dumps
+
+  # G · g1 — a common production setting: 80 % of the limit for the heap, the G1 collector, and a 10 % to-space
+  # reserve (G1ReservePercent sets aside part of the heap for evacuation; it does not leave room outside the heap).
+  # G1's own bookkeeping (remembered sets, card table) lives outside the heap, next to everything else 80 % leaves 20 %
+  # for. On OpenJ9 the two G1 flags are silently ignored (unknown -XX options), so there it is 80 % on gencon.
+  g1:
+    <<: *leaklab
+    profiles: ["all"]
+    container_name: leaklab-g1-${LEAKLAB_JVM_NAME:-redhat}-${LEAKLAB_JAVA_VERSION:-21}
+    ports: ["${LEAKLAB_PORT_PREFIX:-61}85:8080"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    environment:
+      LEAKLAB_SCENARIO: g1
+      JAVA_OPTS: "-XX:MaxRAMPercentage=80 -XX:+UseG1GC -XX:G1ReservePercent=10"
+    volumes:
+      - ${LEAKLAB_DUMPS:-./dumps/redhat-21}/g1:/dumps
+
+  # M · manual — your own sizing, the plain `up`. The env file picks JVM and version as for A–D; every knob below is
+  # optional and comes from, in order of precedence, the shell, a second env file (manual.env), or the default here:
+  #   docker compose --env-file temurin-21.env --env-file manual.env up --build          # → http://localhost:7184
+  #   LEAKLAB_MANUAL_MEM=768m LEAKLAB_MANUAL_JAVA_OPTS="-Xmx600m" docker compose --env-file temurin-21.env up
+  #   PowerShell: $env:LEAKLAB_MANUAL_MEM="768m"; docker compose up                          # Red Hat 21: :6184
+  # `up` again with new values recreates the container. The verdict banner shows at once whether the numbers fit;
+  # then drive a leak from the UI.
+  manual:
+    <<: *leaklab
+    profiles: ["manual"]
+    container_name: leaklab-manual-${LEAKLAB_JVM_NAME:-redhat}-${LEAKLAB_JAVA_VERSION:-21}
+    ports: ["${LEAKLAB_PORT_PREFIX:-61}84:8080"]
+    mem_limit: ${LEAKLAB_MANUAL_MEM:-1g}                   # the container limit: 512m, 768m, 1g, 2g, …
+    memswap_limit: ${LEAKLAB_MANUAL_MEM:-1g}               # same value: no swap
+    cpus: ${LEAKLAB_MANUAL_CPUS:-2}                        # HotSpot picks G1 instead of Serial from 2 CPUs and 1792 MiB
+    environment:
+      LEAKLAB_SCENARIO: manual
+      # Default: the most common production setting, 75 % of the limit and nothing else. Try -Xmx, other
+      # percentages, -XX:MaxDirectMemorySize, -XX:+UseG1GC, -XX:+ExitOnOutOfMemoryError, …
+      JAVA_OPTS: ${LEAKLAB_MANUAL_JAVA_OPTS:--XX:MaxRAMPercentage=75}
+      LEAKLAB_LOAD_MODE: ${LEAKLAB_MANUAL_LOAD_MODE:-HEAP}                  # leak target at start: HEAP | DIRECT | NATIVE
+      LEAKLAB_GUARDIAN_ENABLED: ${LEAKLAB_MANUAL_GUARDIAN:-true}           # false: watch an OOMKill leave no evidence
+      LEAKLAB_GUARDIAN_THRESHOLD: ${LEAKLAB_MANUAL_GUARDIAN_THRESHOLD:-0.90} # fraction of the limit
+      LEAKLAB_LOAD_KEEP_RUNNING_ON_OOM: ${LEAKLAB_MANUAL_KEEP_RUNNING_ON_OOM:-false} # true: no pause after an OOM
+    volumes:
+      - ${LEAKLAB_DUMPS:-./dumps/redhat-21}/manual:/dumps

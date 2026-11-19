@@ -1,0 +1,21 @@
+# MAT> dominator_tree
+
+Class Name                                                                    | Shallow Heap | Retained Heap | Percentage
+--------------------------------------------------------------------------------------------------------------------------
+class io.leaklab.leak.CustomerSessionCache @ 0xd9e49a70                       |          224 |   254,830,240 |     81.44%
+io.leaklab.load.LoadEngine @ 0xd9cf00f8                                       |           64 |    25,166,048 |      8.04%
+io.leaklab.load.LoadEngine_ClientProxy @ 0xd9e7caf0                           |           72 |    25,165,984 |      8.04%
+io.quarkus.bootstrap.runner.RunnerClassLoader @ 0xd9ad05e8                    |          136 |       377,688 |      0.12%
+class java.time.zone.ZoneRulesProvider @ 0xd9e47f78                           |          224 |       181,200 |      0.06%
+io.vertx.core.impl.VertxThread @ 0xd9d8c250                                   |          144 |       149,424 |      0.05%
+class sun.util.calendar.ZoneInfoFile @ 0xd9be0af0                             |          224 |       138,072 |      0.04%
+io.vertx.core.impl.VertxThread @ 0xd9cc4508                                   |          144 |       117,032 |      0.04%
+class java.lang.invoke.MethodType @ 0xd99a4a58                                |          224 |       112,584 |      0.04%
+io.vertx.core.impl.VertxThread @ 0xd9cc4158                                   |          144 |       109,944 |      0.04%
+io.smallrye.config.SmallRyeConfig @ 0xd9befa58                                |           32 |       104,568 |      0.03%
+class java.util.Locale$LocaleCache @ 0xd9c89838                               |          224 |        98,944 |      0.03%
+com.fasterxml.jackson.databind.ser.DefaultSerializerProvider$Impl @ 0xd9f15f08|           72 |        86,064 |      0.03%
+class io.netty.util.internal.StringUtil @ 0xd9c33ac8                          |          224 |        78,784 |      0.03%
+class sun.security.util.KnownOIDs @ 0xd9fa19a0                                |          224 |        76,632 |      0.02%
+Total: 15 entries                                                             |        2,376 |   306,793,208 |     98.04%
+--------------------------------------------------------------------------------------------------------------------------

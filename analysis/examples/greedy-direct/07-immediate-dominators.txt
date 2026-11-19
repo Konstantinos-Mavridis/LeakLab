@@ -1,0 +1,21 @@
+# MAT> immediate_dominators byte[]
+
+Class Name                                                 | Objects | Dominated Objects | Shallow Heap | Dom. Shallow Heap
+----------------------------------------------------------------------------------------------------------------------------
+io.leaklab.load.LoadEngine                                 |       1 |                 1 |           64 |        25,165,832
+io.leaklab.load.LoadEngine_ClientProxy                     |       1 |                 1 |           72 |        25,165,832
+<ROOT>                                                     |       1 |            23,256 |            0 |         1,298,792
+io.netty.buffer.PoolChunk                                  |       3 |                 3 |          240 |           196,632
+io.quarkus.bootstrap.runner.RunnerClassLoader              |       1 |             2,223 |          136 |           110,368
+byte[][]                                                   |       3 |               857 |        3,456 |           100,544
+io.quarkus.bootstrap.runner.JarResource                    |     136 |               357 |        3,264 |            29,504
+com.fasterxml.jackson.core.util.BufferRecycler             |       2 |                 3 |           48 |            24,024
+io.smallrye.config.ConfigMappings$ConfigClass              |      18 |               350 |          432 |            17,808
+io.quarkus.bootstrap.runner.JarResource$JarUrlStreamHandler|     136 |               136 |        2,176 |            11,680
+io.netty.util.AsciiString                                  |     320 |               490 |       10,240 |            10,840
+io.quarkus.runtime.StartupContext                          |       1 |               126 |           32 |             8,992
+io.smallrye.config.PropertyNamesMatcher$Node               |     413 |               413 |       13,216 |             8,816
+org.jboss.logmanager.FastCopyHashMap$Entry                 |     236 |               236 |        5,664 |             5,584
+io.quarkus.bootstrap.runner.ManifestInfo                   |      41 |               182 |        1,312 |             4,984
+Total: 15 entries                                          |   1,313 |            28,634 |       40,352 |        52,160,232
+----------------------------------------------------------------------------------------------------------------------------

@@ -1,0 +1,33 @@
+# Scenario G · g1 — a common production setting: 80 % of the limit for the heap, the G1 collector, and a 10 % to-space
+# reserve. G1ReservePercent sets aside part of the heap for evacuation; it leaves no room outside the heap, where G1's
+# own bookkeeping, threads, code and direct buffers all have to fit into the remaining 20 %.
+# On OpenJ9 the two G1 flags are silently ignored: there it is 80 % on gencon.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+nameSuffix: -g1
+labels:
+  - pairs:
+      leaklab.io/scenario: g1
+    includeSelectors: true
+patches:
+  - target: { kind: Deployment, name: leaklab }
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: leaklab
+      spec:
+        template:
+          spec:
+            containers:
+              - name: leaklab
+                env:
+                  - name: LEAKLAB_SCENARIO
+                    value: g1
+                  - name: JAVA_OPTS
+                    value: -XX:MaxRAMPercentage=80 -XX:+UseG1GC -XX:G1ReservePercent=10
+                resources:
+                  requests: { cpu: 500m, memory: 1Gi }
+                  limits: { memory: 1Gi }

@@ -1,0 +1,230 @@
+<section class="part" id="scenario-c">
+  <div class="num">C</div>
+  <div class="kicker">Scenario C · port 8082</div>
+  <h1>greedy: the percentage trap</h1>
+  <div class="bar"></div>
+  <p class="lead">"We use <code>MaxRAMPercentage</code>, so we're container-aware and safe." This scenario tests that
+    belief. Unlike B, nothing is obviously wrong: there is no <code>-Xmx</code>, and the heap ceiling fits inside the
+    limit. It is an <b>implicit overcommit</b>. A percentage sizes the heap and nothing else, and the JVM's other memory,
+    above all direct buffers with their default cap the size of the heap, has nowhere to go.</p>
+  <ul class="inpart">
+    <li>C1 Configuration and verdict</li><li>C2 The JVM did read the limit</li><li>C3 The direct-buffer leak</li>
+    <li>C4 Why no OutOfMemoryError</li><li>C5 Variant: the heap leak, a knife edge</li><li>C6 RSS vs. working set</li>
+    <li>C7 Other ways a percentage overcommits</li><li>C8 Fixing and checking</li>
+  </ul>
+</section>
+
+<section>
+  <div class="step" id="c1"><div class="step-head"><span class="step-no">C1</span><h3>Configuration and verdict</h3><span class="when">compose: greedy</span></div>
+<pre>mem_limit: 1g     memswap_limit: 1g
+JAVA_OPTS: "-XX:MaxRAMPercentage=95"        <span class="c"># no -Xmx, no MaxDirectMemorySize</span>
+LEAKLAB_LOAD_MODE: DIRECT                   <span class="c"># the leak target starts on Direct</span></pre>
+    <div class="box lab"><div class="label">In the lab · real verdict, before any load (Semeru)</div>
+<pre><span class="h">OOMKILL_LIKELY — Heap ceiling + native footprint exceed the limit</span>
+Heap ceiling 972 MiB + non-heap footprint 71 MiB + direct-memory allowance 972 MiB
+(no MaxDirectMemorySize: default ≈ max heap) = 1.97 GiB, above the 1.00 GiB limit.</pre>
+      <p>On HotSpot 25 (Oracle, Temurin) the heap and its non-heap just fit, so the verdict names the real culprit
+        instead: <i>"The off-heap allowance doesn't fit in the room left"</i>. HotSpot 17 and 21 need 20–40 MiB
+        more outside the heap and read like Semeru, or fit by a few MiB. Red on all twelve variants.</p></div>
+    <div class="box tech"><div class="label">Technically</div><p>95 % of 1 GiB gives a 973 MiB heap ceiling and leaves
+      about 51 MiB for everything else. The JVM's own non-heap memory (class storage, JIT, threads, GC metadata,
+      libraries) already needs 71–76 MiB at idle. And because <code>MaxDirectMemorySize</code> isn't set, direct buffers
+      may grow to about the max heap, <i>on top of</i> the heap. The verdict adds all three ceilings: the JVM is allowed
+      almost twice what the container has. The configuration is wrong before a single byte leaks.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>This time nobody handed the tenant a wrong note. The
+      tenant measured the apartment themselves and decided "my storage room may use 95 % of the floor". But the bed and
+      the desk need more than the remaining 5 %, and the crate rule allows as many crates as the storage room is big.</p></div>
+  </div>
+  <div class="step" id="c2"><div class="step-head"><span class="step-no">C2</span><h3>The JVM did read the limit</h3><span class="when">javacore ENVINFO</span></div>
+<pre>3CICGRPINFO        Memory Limit : 1073741824 bytes        <span class="c"># 1 GiB: container detection worked</span>
+3CICGRPINFO        Memory Usage : 976297984 bytes         <span class="c"># 91 % when the guardian took this javacore</span></pre>
+    <div class="box tech"><div class="label">Technically</div><p>Container support worked as designed. OpenJ9 read
+      <code>memory.max</code> and computed the heap ceiling from it. <code>MaxRAMPercentage</code> answers one question
+      only: <i>"how big may the heap get?"</i>. It doesn't reserve room for non-heap or direct memory. Being
+      container-aware is necessary but not sufficient.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The tenant <i>did</i> measure the apartment
+      correctly. They just only planned for the storage room.</p></div>
+  </div>
+  <div class="step" id="c3"><div class="step-head"><span class="step-no">C3</span><h3>The direct-buffer leak</h3><span class="when">preset "Aggressive leak" · target Direct</span></div>
+    <div class="box lab"><div class="label">In the lab · real telemetry (Semeru; the HotSpot builds end the same way)</div>
+      <table>
+        <thead><tr><th class="num">t (s)</th><th class="num">heap used</th><th class="num">direct (retained)</th><th class="num">working set</th><th>event</th></tr></thead>
+        <tbody>
+          <tr><td class="num">0</td><td class="num">58 MiB</td><td class="num">0 MiB</td><td class="num">≈ 125 MiB</td><td>verdict already red</td></tr>
+          <tr><td class="num">15</td><td class="num">58 MiB</td><td class="num">333 MiB</td><td class="num">512 MiB</td><td></td></tr>
+          <tr><td class="num">31</td><td class="num">57 MiB</td><td class="num">650 MiB</td><td class="num">891 MiB</td><td></td></tr>
+          <tr><td class="num">≈ 34</td><td colspan="3">guardian at 92 %: javacore 96 ms, PHD 226 ms</td><td></td></tr>
+          <tr><td class="num">40</td><td colspan="3">— connection lost —</td><td><code>OOMKilled=true</code>, exit 137</td></tr>
+        </tbody>
+      </table>
+<pre>javacore:  5MEMUSER   +--Direct Byte Buffers: 848,953,248 bytes / 1636 allocations
+HotSpot:   VM report, NMT   -  Other (reserved=…, committed=750–785 MiB)
+MAT:       histogram java.nio.DirectByteBuffer → small wrappers, ~120 KB of heap</pre></div>
+    <div class="box tech"><div class="label">Technically</div><p>The heap sits flat at about 58 MiB the whole time. What
+      grows is direct memory, which the heap dump barely shows: each buffer is a small <code>DirectByteBuffer</code>
+      wrapper on the heap, and its native block is not in a PHD or HPROF. The guardian's javacore (OpenJ9) or VM report
+      (HotSpot NMT) names the consumer exactly. The retained tile in the UI shows less than the javacore, because churned
+      buffers are only freed by their <i>Cleaner</i> after a GC, and a flat heap rarely collects.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The storage room stays tidy. Crates pile up in the
+      hallway instead, and the landlord counts the hallway too.</p></div>
+  </div>
+  <div class="step" id="c4"><div class="step-head"><span class="step-no">C4</span><h3>Why no OutOfMemoryError was ever thrown</h3><span class="when">the direct cap's default</span></div>
+    <div class="box tech"><div class="label">Technically</div><p>Without <code>-XX:MaxDirectMemorySize</code>, the direct
+      cap defaults to about the max heap, here ≈ 973 MiB, <i>in addition to</i> the heap. A direct-buffer
+      <code>OutOfMemoryError</code> ("Cannot reserve … bytes of direct buffer memory") would need direct memory to reach
+      973 MiB, and heap plus direct to approach 1.9 GiB, in a 1 GiB container. The kernel acts at 750–880 MiB of direct
+      memory. The JVM's safety net was set higher than the trapdoor beneath it, on every JVM.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>By the tenant's own crate rule there was still plenty
+      of room for crates, so the tenant never raised the alarm. The landlord was counting the whole apartment.</p></div>
+    <div class="box why"><div class="label">The fix, already in the lab</div><p>Scenario A's direct-buffer variant
+      (A10) is this scenario with the cap set: <code>MaxDirectMemorySize=96m</code> turns the same leak into a Java
+      <code>OutOfMemoryError</code> with dumps, and the process stays alive.</p></div>
+  </div>
+  <div class="step" id="c5"><div class="step-head"><span class="step-no">C5</span><h3>Variant: the heap leak, a knife edge</h3><span class="when">target Heap · 50 req/s · 512 KiB · 40 %</span></div>
+    <div class="box lab"><div class="label">In the lab · real telemetry, Semeru, every 3 s until death</div>
+      <table>
+        <thead><tr><th class="num">t (s)</th><th class="num">heap used</th><th class="num">heap committed</th><th class="num">RSS</th><th class="num">working set</th><th class="num">pressure</th><th>event</th></tr></thead>
+        <tbody>
+          <tr><td class="num">0</td><td class="num">64 MiB</td><td class="num">83 MiB</td><td class="num">174 MiB</td><td class="num">136 MiB</td><td class="num">13 %</td><td></td></tr>
+          <tr><td class="num">42</td><td class="num">501 MiB</td><td class="num">646 MiB</td><td class="num">616 MiB</td><td class="num">576 MiB</td><td class="num">56 %</td><td></td></tr>
+          <tr><td class="num">73</td><td class="num">791 MiB</td><td class="num">973 MiB</td><td class="num">918 MiB</td><td class="num">880 MiB</td><td class="num">86 %</td><td>heap fully committed</td></tr>
+          <tr><td class="num">79</td><td class="num">864 MiB</td><td class="num">973 MiB</td><td class="num">996 MiB</td><td class="num">957 MiB</td><td class="num">93 %</td><td>guardian: javacore 113 ms, PHD 248 ms</td></tr>
+          <tr><td class="num">85</td><td class="num">926 MiB</td><td class="num">973 MiB</td><td class="num">1056 MiB</td><td class="num">1016 MiB</td><td class="num">99 %</td><td></td></tr>
+          <tr><td class="num">93</td><td colspan="5">— connection lost —</td><td><code>OOMKilled=true</code>, exit 137</td></tr>
+        </tbody>
+      </table></div>
+    <div class="box tech"><div class="label">Technically</div><p>Heap committed grows in steps (83 → 137 → … → 500 → 646 → 841 → 973 MiB) as OpenJ9 expands the heap after GCs, until it reaches the ceiling. The working set tracks
+      heap + non-heap. The guardian fires at 91 %, and the kernel kills the process at the limit about 86 s after the
+      leak starts.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The storage room grows in jumps until it reaches the
+      size the tenant allowed. By then, storage room plus furniture fill the whole apartment. The smoke alarm takes
+      its photos at 91 %, and the landlord arrives a few seconds later.</p></div>
+
+<pre><span class="c"># last GC record before the kill: 36 MiB of heap still free</span>
+&lt;mem-info id="4016" free="38143712" total="1020002304" percent="3"&gt;
+max heap (-Xmx): 972.8 MiB; live set peaked at 92% of it
+VERDICT: rising floor — consistent with a heap leak</pre>
+    <div class="box tech"><div class="label">Technically</div><p>At the last collection the heap still had 36 MiB
+      free. An <code>OutOfMemoryError</code> needs a failed allocation <i>after</i> a full collection, and that never
+      happened. The kernel's limit was reached first. The JVM's safety net was set higher than the trapdoor
+      beneath it.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>By the tenant's own rule there was still a bit of
+      storage room left, so the tenant never raised the alarm. The landlord was counting the whole apartment.</p></div>
+    <div class="box warn"><div class="label">On HotSpot</div><p>With the same flags, the HotSpot 25 builds (Red Hat, Oracle, Temurin) end differently:
+      HotSpot picks Serial GC and needs less non-heap memory, so it fits by about 9 MiB and throws a Java
+      <code>OutOfMemoryError</code> instead of being killed. The margin is far too thin to rely on (Appendix C): in one
+      run the container survived the leak at 1016 of 1024 MiB, and the <code>sh</code> started by
+      <code>docker exec</code> to read <code>memory.events</code> was the allocation that triggered the kill. On
+      <b>Java 17 and 21</b> the same HotSpot needs 20–40 MiB more outside the heap, and all of them were killed again,
+      including LeakLab's default, Red Hat 21:
+      the margin moves with the Java version.</p></div>
+  </div>
+  <div class="step" id="c6"><div class="step-head"><span class="step-no">C6</span><h3>A detail that matters: RSS above the limit?</h3></div>
+    <div class="box tech"><div class="label">Technically</div><p>At t = 85 s, RSS read <b>1,056 MiB, above the 1,024 MiB
+      limit</b>, while the cgroup working set read 1,016 MiB. RSS also counts file-backed pages shared with other
+      processes (JDK libraries, mapped JARs) that may be charged to another cgroup or reclaimed. The kernel acts on
+      the cgroup's own accounting. Alert on <code>container_memory_working_set_bytes</code>, and use RSS as a
+      secondary signal.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The tenant's own inventory also lists the shared
+      bookcase in the hallway. The landlord's tape measure only counts what is inside the apartment.</p></div>
+  </div>
+  <div class="step" id="c7"><div class="step-head"><span class="step-no">C7</span><h3>Other ways a percentage still overcommits</h3></div>
+    <table>
+      <thead><tr><th style="width:30%">Way</th><th>Why the percentage doesn't help</th></tr></thead>
+      <tbody>
+        <tr><td>Percentage too high for the size</td><td>Non-heap is roughly constant (~80–200 MiB). At 1 GiB, 95 % leaves 51 MiB for it</td></tr>
+        <tr><td>Native growth</td><td>FFM, JNI, threads and glibc arenas are governed by no JVM flag (Scenario D)</td></tr>
+        <tr><td>Direct buffers without a cap</td><td>The default cap is about the max heap, on top of the heap (C3)</td></tr>
+        <tr><td>Wrong base for the percentage</td><td>No container detection (<code>-XX:-UseContainerSupport</code>, or a JVM too old for cgroup v2: HotSpot &lt; 15 / 11.0.16 / 8u372), a limit set only on a parent cgroup, or no limit at all. The percentage then applies to <b>node</b> RAM</td></tr>
+        <tr><td>Limit changed after start</td><td>The heap ceiling is computed once, at start-up. In-place resize doesn't shrink it</td></tr>
+        <tr><td><code>-Xmx</code> injected elsewhere</td><td><code>JAVA_TOOL_OPTIONS</code> from a base image or agent. An explicit <code>-Xmx</code> wins over the percentage</td></tr>
+        <tr><td>Several JVMs per container</td><td>Each takes its own percentage of the same limit: 2 × 60 % = 120 %</td></tr>
+        <tr><td>HotSpot, very small containers</td><td>Below ~250 MB the ceiling comes from <code>MinRAMPercentage</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="step" id="c8"><div class="step-head"><span class="step-no">C8</span><h3>Fixing and checking</h3></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <ul>
+        <li>Choose the percentage from a <b>measured</b> non-heap footprint: limit − footprint − headroom. The playbook
+          range is 50–60 % at ≤ 1 GiB.</li>
+        <li>Always cap direct memory (<code>-XX:MaxDirectMemorySize</code>). This turns C3 into a diagnosable
+          <code>OutOfMemoryError</code>, as in Scenario A10.</li>
+        <li>One JVM per container. Audit <code>JAVA_TOOL_OPTIONS</code>.</li>
+        <li>Check what the JVM decided: OpenJ9 <code>java -verbose:sizes -version</code> and javacore
+          <code>3CICGRPINFO Memory Limit</code>; HotSpot <code>-XshowSettings:system</code>,
+          <code>-XX:+PrintFlagsFinal</code>.</li>
+        <li>Keep the guardian or an equivalent alert at about 90 % of the working set. It captured evidence before the
+          kill in nearly every run of this scenario, on all twelve variants. The exceptions: on HotSpot 17 and 21 the
+          heap variant can jump from 83 % to 97 % between two polls, and in one run each on Oracle 21 and Red Hat 17
+          nothing was written in time.</li>
+      </ul></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Measure the furniture first, then decide how big the
+      storage room may be. Put a separate rule on the crates. And keep the smoke alarm.</p></div>
+  </div>
+  <div class="box arch nobreak"><div class="label">Scenario C · key takeaways</div>
+    <ul>
+      <li><code>MaxRAMPercentage</code> makes the <i>heap</i> container-aware. It doesn't make the <i>process</i> fit.</li>
+      <li>B is an explicit overcommit you can see in one flag. C is implicit: every number looks reasonable on its own,
+        and only their sum (heap ceiling + non-heap + direct allowance) exceeds the limit.</li>
+      <li>Uncapped direct memory effectively doubles the heap budget. Always cap it: then C becomes A10, a Java OOM with dumps.</li>
+      <li>The heap-leak variant is a knife edge: OpenJ9 was killed, HotSpot 25 survived by ~9 MiB, HotSpot 17 and 21
+        were killed again. Don't size that close: a JVM upgrade moves the margin.</li>
+      <li>Alert on the cgroup working set, not RSS. The guardian captured evidence before almost every kill; a fast jump between two polls can still beat it.</li>
+    </ul></div>
+</section>
+
+<section class="readiness flow" id="c-ready">
+  <h2>C · Forensics readiness: proving an implicit overcommit</h2>
+  <p>Everything from B applies: GC log on a volume, termination record, platform metrics, node log, pre-kill capture.
+    C adds a few needs. You must be able to see the <b>effective</b> configuration (where options can be injected
+    from several places), the <b>non-heap footprint</b> the percentage has to leave room for, and <b>direct memory</b>
+    as a separate series.</p>
+  <div class="legend"><span>When it must be in place:</span>
+    <span class="tw build">image build</span>
+    <span class="tw start">start-up · restart</span>
+    <span class="tw live">runtime · no restart</span>
+    <span class="tw platform">platform · beforehand</span>
+    <span class="tw after">after the fact</span>
+    <span>· Lab: <span class="lab-yes">✓</span> · <span class="lab-part">◐</span> · <span class="lab-no">✗</span></span>
+  </div>
+  <table class="ready">
+    <thead><tr><th>Requirement</th><th>Default</th><th>Why it matters</th><th>How: flags, config, tools</th><th>When / restart</th><th>Lab</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="6">Effective configuration</td></tr>
+      <tr><td>The options the JVM actually received</td><td><span class="def on">on</span></td><td><code>JAVA_TOOL_OPTIONS</code>, base images and agents can add <code>-Xmx</code> or another percentage</td><td>javacore (<code>kill -QUIT 1</code>): <code>1CICMDLINE</code>, <code>2CIUSERARG</code>, <code>2CIENVVAR</code>; or <code>cat /proc/1/cmdline</code>, <code>cat /proc/1/environ</code></td><td><span class="tw live">runtime · no restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Heap ceiling vs limit</td><td><span class="def on">on</span></td><td>The overcommit is visible before any load</td><td>javacore <code>3CICGRPINFO Memory Limit</code>; <code>java $JAVA_OPTS -verbose:sizes -version</code> (OpenJ9) or <code>-XshowSettings:system</code> (HotSpot); the LeakLab verdict</td><td><span class="tw live">runtime · no restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Fail fast on misspelled flags</td><td><span class="def off">off</span><br>unknown <code>-XX:</code> silently ignored</td><td>A typo in <code>-XX:MaxRAMPercentage</code> silently means default sizing</td><td><code>-XX:-IgnoreUnrecognizedVMOptions -XX:-IgnoreUnrecognizedXXColonOptions</code> (both, tested in this image)</td><td><span class="tw start">start-up · restart</span></td><td class="lab-no">✗</td></tr>
+      <tr><td>One JVM per container</td><td><span class="def na">n/a</span></td><td>Each JVM takes its own percentage of the same limit</td><td><code>ls /proc/*/cmdline</code> or <code>ps -o pid,args</code>; enforce in design reviews</td><td><span class="tw live">runtime</span> check, design rule</td><td class="lab-yes">✓</td></tr>
+      <tr class="group"><td colspan="6">The numbers the percentage must leave room for</td></tr>
+      <tr><td>Measured non-heap footprint</td><td><span class="def var">varies</span><br><code>/proc</code>: on; metric: off</td><td>Basis for choosing a safe percentage (76 MiB here)</td><td>RSS from <code>/proc/1/status</code> (always available) minus heap committed (MXBean metric, or javacore <code>1STHEAPTOTAL</code>); exported as a metric</td><td><span class="tw live">runtime</span> (manual)<br><span class="tw build">image build</span> (metric)</td><td class="lab-yes">✓</td></tr>
+      <tr><td>Working-set alerting, not RSS</td><td><span class="def off">off</span></td><td>RSS read 1,056 MiB, above the limit, while the kernel counted 1,016 MiB</td><td><code>container_memory_working_set_bytes / limit &gt; 0.9</code></td><td><span class="tw platform">platform · beforehand</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Direct memory as its own series</td><td><span class="def var">varies</span><br>javacore: on; metric: off</td><td>Spot direct growth while the heap stays flat</td><td>Micrometer <code>jvm_buffer_memory_used_bytes{id="direct"}</code>; javacore <code>Direct Byte Buffers</code>; heap dump <code>histogram java.nio.DirectByteBuffer</code></td><td><span class="tw build">image build</span> (metric)<br><span class="tw live">runtime</span> (javacore)</td><td class="lab-yes">✓</td></tr>
+      <tr class="group"><td colspan="6">Turning the kill into evidence</td></tr>
+      <tr><td>Cap direct memory</td><td><span class="def off">off</span><br>default ≈ max heap</td><td>Turns C3 into a direct-buffer <code>OutOfMemoryError</code>. Its dumps need the <code>events=throw</code> agent (A · readiness)</td><td><code>-XX:MaxDirectMemorySize=…</code></td><td><span class="tw start">start-up · restart</span></td><td class="lab-no">✗</td></tr>
+      <tr><td>Pre-kill capture</td><td><span class="def off">off</span></td><td>Evidence before the kill on all twelve variants (rare misses on HotSpot 17 and 21)</td><td>Guardian at 90 % (javacore first, then PHD)</td><td><span class="tw start">start-up · restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>GC log, termination record, metrics, node log</td><td><span class="def var">varies</span><br>see B</td><td>As in Scenario B</td><td>See the B table</td><td><span class="tw start">start-up</span><span class="tw platform">platform</span></td><td class="lab-part">◐</td></tr>
+    </tbody>
+  </table>
+  <p class="small"><span class="lab-no">✗</span> Direct memory is uncapped in <i>greedy</i> by design. That's the failure being
+    demonstrated.</p>
+  <div class="box lab"><div class="label">In the lab · options you didn't write (real javacore, greedy)</div>
+<pre>2CIENVVAR      JAVA_OPTS=-XX:MaxRAMPercentage=95
+2CIENVVAR      JAVA_TOOL_OPTIONS=-XX:+IgnoreUnrecognizedVMOptions -XX:+PortableSharedCache -XX:+IdleTuningGcOnIdle
+               -Xshareclasses:name=openj9_system_scc,cacheDir=/opt/java/.scc,readonly,nonFatal</pre>
+    <p>The IBM Semeru base image sets <code>JAVA_TOOL_OPTIONS</code> itself. Here that's harmless (shared class cache,
+      idle tuning), but it is a second source of options your deployment YAML doesn't show. Tested in this image, a
+      <b>misspelled</b> sizing flag is a silent trap:</p>
+<pre>java -XX:MaxRamPercentage=60 -version                         <span class="c"># starts normally: typo silently ignored → default sizing</span>
+java -Xmxx1g -version                                         <span class="y"># JVMJ9VM007E Command-line option unrecognised → aborts</span>
+java -XX:-IgnoreUnrecognizedVMOptions -XX:-IgnoreUnrecognizedXXColonOptions -XX:MaxRamPercentage=60 -version
+                                                              <span class="h"># JVMJ9VM007E … unrecognised: -XX:MaxRamPercentage=60 → aborts</span></pre>
+    <p>OpenJ9 ignores unknown <code>-XX:</code> options by default, and the image's <code>-XX:+IgnoreUnrecognizedVMOptions</code>
+      reinforces that. Setting <code>-XX:-IgnoreUnrecognizedXXColonOptions</code> alone is <i>not</i> enough while that
+      variable is present. Both must be disabled for a typo to fail fast. In every case, read the effective options and
+      the resulting heap size from the javacore rather than trusting the YAML.</p></div>
+  <div class="box eli5"><div class="label">Like I'm five</div><p>To prove the tenant planned badly, you need their
+    written plan (the effective options), a measurement of the furniture (non-heap), and a separate count of the
+    crates (direct memory). The plan and the crate count can be read any time. The crate limit and the smoke alarm
+    have to be installed before moving in.</p></div>
+</section>

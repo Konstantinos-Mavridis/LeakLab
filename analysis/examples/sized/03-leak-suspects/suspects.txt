@@ -1,0 +1,91 @@
+Description
+The class io.leaklab.leak.CustomerSessionCache , loaded by <system class loader> , occupies 254,830,240 (81.44%) bytes. The top consumers of its minimum retained heap are byte[] (2,919 instances totaling 254,619,624), java.lang.Object[] (971 instances totaling 54,376), and java.lang.String (1,948 instances totaling 46,752). The memory is accumulated in one instance of java.util.concurrent.ConcurrentHashMap$Node[] , loaded by <system class loader> , which occupies 254,829,864 (81.44%) bytes. Keywords 
+io.leaklab.leak.CustomerSessionCache
+java.util.concurrent.ConcurrentHashMap$Node[]
+Shortest Paths To the Accumulation Point 
+Class Name Shallow Heap Retained Heap 
+java.util.concurrent.ConcurrentHashMap$Node[2048] @ 0xd9b7e9f8 
+8,200 254,829,864 
+\ java.util.concurrent.ConcurrentHashMap @ 0xd9f15260 
+64 254,829,928 
+.\ class io.leaklab.leak.CustomerSessionCache @ 0xd9e49a70 System Class 
+224 254,830,240 
+Accumulated Objects in Dominator Tree 
+Class Name Shallow Heap Retained Heap Percentage 
+class io.leaklab.leak.CustomerSessionCache @ 0xd9e49a70 
+224 254,830,240 81.44% 
+\ java.util.concurrent.ConcurrentHashMap @ 0xd9f15260 
+64 254,829,928 81.44% 
+.\ java.util.concurrent.ConcurrentHashMap$Node[2048] @ 0xd9b7e9f8 
+8,200 254,829,864 81.44% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda0f1210 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda0f3600 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda0f3e00 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda0f4618 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda0f4988 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda0f5d60 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda0f60a8 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda0faf88 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda0fead0 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda101cd0 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda221d88 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda2228a8 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda223218 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda2245c8 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda226ed8 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda227938 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda229380 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda22ae20 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda22b730 
+24 787,296 0.25% 
+..+ java.util.concurrent.ConcurrentHashMap$Node @ 0xda22c0e8 
+24 787,296 0.25% 
+..\ Total: 20 entries
+480 15,745,920 5.03% 
+Accumulated Objects by Class in Dominator Tree 
+Label Number of Objects Used Heap Size Retained Heap Size 
+java.util.concurrent.ConcurrentHashMap$Node 
+All objects 773 18,552 254,821,464 
+java.lang.String 
+All objects 5 120 200 
+Total: 2 entries
+778 18,672 254,821,664 
+All Accumulated Objects by Class 
+Class Name Objects Shallow Heap 
+byte[] 
+First 10 of 2,918 objects 2,918 254,619,576 
+java.lang.Object[] 
+First 10 of 971 objects 971 54,376 
+java.lang.String 
+First 10 of 1,947 objects 1,947 46,728 
+io.leaklab.leak.SessionContext 
+First 10 of 971 objects 971 31,072 
+java.util.concurrent.ConcurrentHashMap$Node 
+First 10 of 971 objects 971 23,304 
+java.time.Instant 
+First 10 of 971 objects 971 23,304 
+java.util.ImmutableCollections$MapN 
+First 10 of 971 objects 971 23,304 
+java.util.concurrent.ConcurrentHashMap$Node[] 
+Only object 1 8,200 
+Total: 8 entries
+9,721 254,829,864 
+

@@ -1,0 +1,21 @@
+# MAT> dominator_tree
+
+Class Name                                                                    | Shallow Heap | Retained Heap | Percentage
+--------------------------------------------------------------------------------------------------------------------------
+class io.leaklab.leak.CustomerSessionCache @ 0xc37f2e18                       |          224 |   808,913,136 |     93.25%
+io.leaklab.load.LoadEngine_ClientProxy @ 0xc6846d70                           |           72 |    25,165,984 |      2.90%
+io.leaklab.load.LoadEngine @ 0xc370ba98                                       |           64 |    25,165,976 |      2.90%
+io.quarkus.bootstrap.runner.RunnerClassLoader @ 0xc33ed6e0                    |          136 |       378,312 |      0.04%
+class java.time.zone.ZoneRulesProvider @ 0xc37f1320                           |          224 |       181,200 |      0.02%
+org.jboss.threads.EnhancedQueueExecutor @ 0xc37644f0                          |          112 |       156,784 |      0.02%
+class sun.util.calendar.ZoneInfoFile @ 0xc35fcd20                             |          224 |       138,072 |      0.02%
+io.vertx.core.impl.VertxThread @ 0xc36c4840                                   |          144 |       118,920 |      0.01%
+class io.vertx.core.http.impl.MimeMapping @ 0xc68d2b68                        |          224 |       115,056 |      0.01%
+class java.lang.invoke.MethodType @ 0xc3344a58                                |          224 |       111,136 |      0.01%
+io.vertx.core.impl.VertxThread @ 0xc36c4d90                                   |          144 |       109,712 |      0.01%
+io.smallrye.config.SmallRyeConfig @ 0xc35ece70                                |           32 |       104,568 |      0.01%
+class java.util.Locale$LocaleCache @ 0xc3693d10                               |          224 |        98,944 |      0.01%
+com.fasterxml.jackson.databind.ser.DefaultSerializerProvider$Impl @ 0xc5016608|           72 |        82,936 |      0.01%
+class io.netty.util.internal.StringUtil @ 0xc3633bd8                          |          224 |        78,784 |      0.01%
+Total: 15 entries                                                             |        2,344 |   860,919,520 |     99.25%
+--------------------------------------------------------------------------------------------------------------------------

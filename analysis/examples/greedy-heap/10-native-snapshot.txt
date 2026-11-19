@@ -1,0 +1,12 @@
+NATIVEMEMINFO snapshot of javacore.greedy.20261017.121346.1.txt — single javacore, absolute values.
+Java Heap and JIT Code Cache are RESERVATIONS; Direct Byte Buffers and sun.misc.Unsafe are real allocations.
+
+JRE: 1,610,708,880 bytes / 9045 allocations
+Java Heap: 1,020,063,744 bytes / 1 allocation
+Threads: 19,307,128 bytes / 200 allocations
+JIT Code Cache: 268,435,456 bytes / 1 allocation
+Class Libraries: 1,602,872 bytes / 80 allocations
+VM Class Libraries: 1,602,872 bytes / 80 allocations
+sun.misc.Unsafe: 1,499,184 bytes / 48 allocations
+Direct Byte Buffers: 1,378,832 bytes / 31 allocations
+sun.misc.Unsafe > Other: 120,352 bytes / 17 allocations

@@ -1,0 +1,21 @@
+# MAT> oql "SELECT s, s.@usedHeapSize, s.@retainedHeapSize FROM io.leaklab.leak.SessionContext s"
+
+s                                             | s.@usedHeapSize | s.@retainedHeapSize
+--------------------------------------------------------------------------------------
+io.leaklab.leak.SessionContext [id=0xd9d81940]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xd9d81978]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xd9d819b0]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xd9d819e8]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0ef7b8]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0ef880]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0ef948]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0efa10]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0efaf0]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0efb28]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0efd08]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0efdd0]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0efe98]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0eff60]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xda0f0028]|              32 |             262,336
+Total: 15 entries                             |                 |                    
+--------------------------------------------------------------------------------------

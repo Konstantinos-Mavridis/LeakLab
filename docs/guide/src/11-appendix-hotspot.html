@@ -1,0 +1,162 @@
+<section class="chapter" id="hotspot">
+  <div class="kicker">Appendix C</div>
+  <h1>The same lab on HotSpot, and on Java 17 and 21</h1>
+  <p class="lead">Every scenario re-run on three HotSpot distributions, the Red Hat build of OpenJDK (LeakLab's default
+    JVM, in version 21), Oracle's OpenJDK build and Eclipse Temurin: same app, same limits, same <code>JAVA_OPTS</code>. Only the JVM and its diagnostic flags change. An env file picks the
+    JVM and the Java version, 17, 21 or 25; each of the twelve variants runs as its own stack, so all of them can run
+    side by side. In the ports, the first digit picks the JVM, the second the version (7 = 17, 1 = 21, 0 = 25).</p>
+  <table>
+    <thead><tr><th style="width:22%">Env file</th><th style="width:34%">JVM</th><th>Stack · containers · ports · dumps</th></tr></thead>
+    <tbody>
+      <tr><td><code>redhat-21.env</code> (default)</td><td>Red Hat build of OpenJDK 21.0.12: HotSpot</td><td><code>leaklab-redhat-21</code> · <code>leaklab-&lt;scenario&gt;-redhat-21</code> · 6180–6183 · <code>dumps/redhat-21/</code></td></tr>
+      <tr><td><code>redhat-17.env</code></td><td>Red Hat build of OpenJDK 17.0.16, UBI 8 (image 1.21): HotSpot</td><td><code>leaklab-redhat-17</code> · <code>leaklab-&lt;scenario&gt;-redhat-17</code> · 6780–6783 · <code>dumps/redhat-17/</code></td></tr>
+      <tr><td><code>redhat-25.env</code></td><td>Red Hat build of OpenJDK 25.0.4: HotSpot</td><td><code>leaklab-redhat-25</code> · <code>leaklab-&lt;scenario&gt;-redhat-25</code> · 6080–6083 · <code>dumps/redhat-25/</code></td></tr>
+      <tr><td><code>semeru-25.env</code></td><td>IBM Semeru 25.0.4: Eclipse OpenJ9</td><td><code>leaklab-semeru-25</code> · <code>leaklab-&lt;scenario&gt;-semeru-25</code> · 8080–8083 · <code>dumps/semeru-25/</code></td></tr>
+      <tr><td><code>semeru-21.env</code></td><td>IBM Semeru 21.0.12: Eclipse OpenJ9</td><td><code>leaklab-semeru-21</code> · <code>leaklab-&lt;scenario&gt;-semeru-21</code> · 8180–8183 · <code>dumps/semeru-21/</code></td></tr>
+      <tr><td><code>semeru-17.env</code></td><td>IBM Semeru 17.0.20: Eclipse OpenJ9</td><td><code>leaklab-semeru-17</code> · <code>leaklab-&lt;scenario&gt;-semeru-17</code> · 8780–8783 · <code>dumps/semeru-17/</code></td></tr>
+      <tr><td><code>oracle-25.env</code></td><td>Oracle OpenJDK 25.0.2: HotSpot</td><td><code>leaklab-oracle-25</code> · <code>leaklab-&lt;scenario&gt;-oracle-25</code> · 9080–9083 · <code>dumps/oracle-25/</code></td></tr>
+      <tr><td><code>oracle-21.env</code></td><td>Oracle OpenJDK 21.0.2: HotSpot</td><td><code>leaklab-oracle-21</code> · <code>leaklab-&lt;scenario&gt;-oracle-21</code> · 9180–9183 · <code>dumps/oracle-21/</code></td></tr>
+      <tr><td><code>oracle-17.env</code></td><td>Oracle OpenJDK 17.0.2: HotSpot</td><td><code>leaklab-oracle-17</code> · <code>leaklab-&lt;scenario&gt;-oracle-17</code> · 9780–9783 · <code>dumps/oracle-17/</code></td></tr>
+      <tr><td><code>temurin-25.env</code></td><td>Eclipse Temurin 25.0.4: HotSpot</td><td><code>leaklab-temurin-25</code> · <code>leaklab-&lt;scenario&gt;-temurin-25</code> · 7080–7083 · <code>dumps/temurin-25/</code></td></tr>
+      <tr><td><code>temurin-21.env</code></td><td>Eclipse Temurin 21.0.12: HotSpot</td><td><code>leaklab-temurin-21</code> · <code>leaklab-&lt;scenario&gt;-temurin-21</code> · 7180–7183 · <code>dumps/temurin-21/</code></td></tr>
+      <tr><td><code>temurin-17.env</code></td><td>Eclipse Temurin 17.0.20: HotSpot</td><td><code>leaklab-temurin-17</code> · <code>leaklab-&lt;scenario&gt;-temurin-17</code> · 7780–7783 · <code>dumps/temurin-17/</code></td></tr>
+    </tbody>
+  </table>
+<pre>docker compose --profile all up --build                             <span class="c"># A–D and G on the default, Red Hat 21</span>
+docker compose --env-file temurin-25.env --profile all up --build   <span class="c"># A–D and G on Temurin 25; without --profile all: manual</span></pre>
+
+  <div class="box tech"><div class="label">Technically · what HotSpot must be told</div>
+    <p>HotSpot writes nothing on <code>OutOfMemoryError</code>, logs no GC and tracks no native memory by default. The
+      image adds, all at start-up (so changing them means a restart):</p>
+<pre>-XX:+HeapDumpOnOutOfMemoryError                 <span class="c"># .hprof on the FIRST VM-thrown OOM of a JVM</span>
+-XX:HeapDumpPath=/dumps/java_oom.&lt;start&gt;.hprof   <span class="c"># unique per start: see gotcha 2</span>
+-XX:NativeMemoryTracking=summary                 <span class="c"># NMT, the counterpart of NATIVEMEMINFO</span>
+-Xlog:gc*:file=/dumps/gc.%t.log:time,uptime,level,tags:filecount=5,filesize=20m</pre>
+    <p>Red Hat's images (<code>registry.access.redhat.com/ubi9/openjdk-21</code>, <code>-25</code>) are current,
+      free to pull, built on UBI 9 and certified for OpenShift; they run as UID 185, so the Containerfile creates
+      <code>/dumps</code> as root before switching to 1001. Oracle's images are its OpenJDK builds (anonymous pull, but frozen: Oracle updates its OpenJDK builds for six
+      months only, so 25 stays at 25.0.2 and 21 at 21.0.2 from January 2024). Oracle JDK (current updates, Oracle
+      licence terms) is the same VM but needs a <code>docker login</code>. Temurin (<code>eclipse-temurin:25-jdk</code>,
+      <code>:21-jdk</code>) is current and pulls anonymously. All HotSpot images must be JDKs, because on-demand heap
+      dumps need <code>jcmd</code>.</p></div>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>A different tenant in the same apartment. This one keeps no diary and owns no camera until you hand them one,
+      and their camera is heavy: one photo of the storage room weighs as much as the room's contents.</p></div>
+
+  <h2>Results on Java 25, side by side</h2>
+  <table>
+    <thead><tr><th style="width:19%">Scenario</th><th style="width:38%">IBM Semeru (OpenJ9)</th><th>HotSpot: Red Hat / Oracle / Temurin</th></tr></thead>
+    <tbody>
+      <tr><td>GC in 1 GiB / 2 CPUs</td><td>gencon</td><td><b>Serial</b>: below 1792 MiB HotSpot isn't "server class"</td></tr>
+      <tr><td><b>A</b> heap leak</td><td>Java OOM; PHD 2.8 MB in 0.4 s, javacore, snap; JVM stays up</td><td>Java OOM; <code>.hprof</code> <b>614 MB in 13.5–55 s</b>, JVM paused throughout; stays up</td></tr>
+      <tr><td>A, second OOM</td><td>dumps again (up to 4 events)</td><td><b>no dump</b>: once per JVM</td></tr>
+      <tr><td>A, direct-buffer OOM</td><td>no dump by default; the image's <code>events=throw</code> agent adds one</td><td><b>no dump, no flag for it</b></td></tr>
+      <tr><td>A, SIGQUIT</td><td>javacore (+ PHD with <code>events=user</code>)</td><td>thread dump on stdout only; the evidence script uses <code>jcmd</code> instead</td></tr>
+      <tr><td><b>B</b> <code>-Xmx1g</code> in 512 MiB</td><td>OOMKilled, exit 137, GC log only</td><td>the same; the GC log ends with a collection that <i>started</i> and never finished</td></tr>
+      <tr><td>B with guardian</td><td>javacore + PHD in 0.3 s, then killed</td><td>at first <b>killed mid-dump</b> (truncated <code>.hprof</code> + <code>.p0</code>); after the fix, a full 345–376 MiB dump in 9–21 s</td></tr>
+      <tr><td><b>C</b> direct leak (main)</td><td>OOMKilled; javacore: Direct Byte Buffers 625–872 MB</td><td>OOMKilled; VM report: NMT <i>Other</i> 750–815 MiB; heap dump cut off</td></tr>
+      <tr><td><b>C</b> 95 %, heap variant</td><td><b>OOMKilled</b> (973 + ~73 MiB &gt; 1024)</td><td><b>all three survived by ~9 MiB</b>: Java OOM, 965 MB dump, container at 1017/1024 MiB; unresponsive for 2–5 min while dumping</td></tr>
+      <tr><td><b>D</b> native leak</td><td>OOMKilled; NATIVEMEMINFO Δ +435–444 MiB (<code>sun.misc.Unsafe</code>)</td><td>OOMKilled; NMT Δ <i>Other</i> +361–381 MiB in ~1460–1490 allocations</td></tr>
+      <tr><td>Analysis</td><td>MAT + DTFJ on PHD</td><td>MAT on <code>.hprof</code>/<code>.hprof.gz</code>; GC-root paths name the fields</td></tr>
+    </tbody>
+  </table>
+  <p class="small">Red Hat, Oracle and Temurin behaved the same everywhere: the distribution decides licence and updates, the VM decides the memory behaviour. The verdict banner predicted every OOMKill and Java OOM. For C it names the uncapped direct allowance on HotSpot 25, where heap and non-heap fit by ~9 MiB: right for the main experiment, conservative for the heap variant that survived. A margin that thin is inside the estimate's error: treat it as a red flag.</p>
+
+  <h2>Java 17, 21 and 25</h2>
+  <p>Every scenario was run again on Java 21 LTS (Red Hat 21.0.12, the default; Semeru 21.0.12; Oracle OpenJDK 21.0.2;
+    Temurin 21.0.12) and on Java 17 LTS (Red Hat 17.0.16 on UBI 8; Semeru and Temurin 17.0.20; Oracle OpenJDK 17.0.2), with the same
+    limits and flags. The jar is compiled with <code>--release</code> for each. One class differs: FFM is not final on
+    Java 17 and 21, so the native leak allocates with <code>sun.misc.Unsafe</code> there (Scenario D, D2).</p>
+  <table>
+    <thead><tr><th style="width:19%">Scenario</th><th style="width:30%">OpenJ9: Semeru 17 / 21 / 25</th><th>HotSpot: Red Hat / Oracle / Temurin 17 / 21 / 25</th></tr></thead>
+    <tbody>
+      <tr><td>Defaults</td><td>identical dump agents; unknown flags ignored</td><td>identical: Serial GC, unknown flags rejected</td></tr>
+      <tr><td>Non-heap at start-up</td><td>70–71 MiB on all three</td><td><b>78–83 MiB on 17, 81–97 MiB on 21</b>, 57–59 MiB on 25</td></tr>
+      <tr><td><b>A</b> heap leak</td><td>the same artefacts</td><td>the same artefacts; the OOM <code>.hprof</code> took <b>3–9 s on 17 and 21, 13.5–55 s on 25</b></td></tr>
+      <tr><td><b>B</b>, <b>C</b> direct, <b>D</b></td><td>the same outcomes and evidence; D: NATIVEMEMINFO Δ +435–451 MiB, same <code>sun.misc.Unsafe</code> category</td><td>the same outcomes and evidence; D: NMT Δ <i>Other</i> +361–404 MiB</td></tr>
+      <tr><td><b>C</b> 95 %, heap variant</td><td>OOMKilled on all three</td><td><b>OOMKilled on 17 and 21</b> (941 MiB heap + 77–95 MiB non-heap), survived on 25; the guardian fired late, twice too late</td></tr>
+    </tbody>
+  </table>
+  <p>Two lessons. First, a configuration that only just fits on one Java version fails on another: a JVM upgrade or
+    downgrade moves the margin, so size with headroom and re-check after every JVM change. Second, JDK 25 writes a heap
+    dump in parallel segments (<code>.hprof.p0</code>, <code>.p1</code>, …) and merges them at the end, JDK 17 and 21 in one
+    pass. In a 2-CPU container the pause grew from 3–9 s to 13.5–55 s for the same heap: give liveness probes room
+    for it.</p>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>The same tenant, in an older edition: their furniture is a little bulkier, so a storage room that just fits for
+      the newer tenant pushes the apartment over. And the older tenant photographs the storage room in one go, while the
+      newer one shoots it in pieces and glues them together afterwards, which takes much longer.</p></div>
+
+  <h2>Scenario G: 80 %, G1, G1ReservePercent=10</h2>
+  <p>A common production setting, run on all twelve variants in 1 GiB: <code>-XX:MaxRAMPercentage=80 -XX:+UseG1GC
+    -XX:G1ReservePercent=10</code>, direct memory uncapped (port x085). The reserve is 10 % of the heap kept free for
+    G1's evacuations, inside the 820 MiB heap: it leaves no extra room outside it. OpenJ9 ignores both G1 flags.</p>
+  <table>
+    <thead><tr><th style="width:19%">Leak</th><th style="width:30%">Outcome</th><th>Detail</th></tr></thead>
+    <tbody>
+      <tr><td>Heap</td><td><span class="pill ok">Java OOM</span> on all twelve</td><td>after 22–65 s, dumps written, container alive; on HotSpot the working set stays near 600 MiB, since G1 commits but never touches much of the heap</td></tr>
+      <tr><td>Direct buffers</td><td><span class="pill mid">a coin toss</span></td><td>direct memory may grow to the heap's size, so 820 + 820 MiB plus 90–105 MiB of JVM overhead is promised in 1024. Java OOM at the very edge on seven variants, <b>OOMKilled</b> on three (Red Hat 17, Temurin 17 and 25), <b>hung at the limit</b> on two (Oracle 17 and 25). The guardian captured evidence in every run</td></tr>
+    </tbody>
+  </table>
+  <p class="small">The verdict is red from the start ("The off-heap allowance doesn't fit in the room left"). One flag
+    settles it: <code>-XX:MaxDirectMemorySize=64m</code> brings the projection to 923–989 MiB (TIGHT), and the
+    direct-buffer leak then ended as a Java OOM on every variant tried, including the three that had been killed or hung.</p>
+
+  <h2>HotSpot gotchas, all reproduced in the lab</h2>
+  <ol>
+    <li><b><code>java_pid1.hprof</code> is never overwritten.</b> The PID is always 1, so after the first restart every
+      OOM dump fails with "File exists". Put the start time in <code>HeapDumpPath</code>.</li>
+    <li><b>First OOM only.</b> Pair the dump flag with <code>-XX:+ExitOnOutOfMemoryError</code>.</li>
+    <li><b>Direct-buffer OOMs are never dumped</b>: they are thrown by Java code, and HotSpot has no throw-event agent.</li>
+    <li><b>HPROF ≈ the live heap in size</b> and contains values, so treat it as sensitive. <code>jcmd 1 GC.heap_dump -gz=1</code>
+      measured 7.6 MB in 1.6 s against 385 MB in 8.8 s. It is not available over JMX, so in-app dumps can't compress.</li>
+    <li><b>A dump costs ~30 MiB of memory</b>, and <code>live=true</code> runs a full GC that can grow an overcommitted
+      heap. Both killed the guardian mid-dump. Fix: dump without the full GC near the limit, and fire 64 MiB early.</li>
+    <li><b>SIGQUIT is not a trigger</b>: use <code>jcmd</code> from outside, which needs a JDK image.</li>
+    <li><b><code>jps</code>/<code>jstat</code> see nothing</b> for a UID with no name (random UIDs on OpenShift):
+      no <code>hsperfdata</code>. Attach-based <code>jcmd</code> still works.</li>
+    <li><b>NMT and the GC log are start-up only</b> (the GC log can also be started with <code>jcmd VM.log</code>).</li>
+    <li><b>Serial GC</b> in small containers: few full GCs, so the live-set signal arrives late. Choose a collector explicitly.</li>
+    <li><b>Diagnosing a container at its limit can kill it.</b> Anything exec'd runs in the container's cgroup: in one run
+      the <code>sh</code> that read <code>memory.events</code> triggered the OOM kill, and <code>jcmd</code> starts a whole
+      second JVM. Capture evidence before the limit; read cgroup files from the node.</li>
+  </ol>
+  <div class="nobreak">
+  <h2>Forensics readiness on HotSpot: what changes</h2>
+  <p>The readiness pages and the matrix in 7.5 describe OpenJ9. On HotSpot the following differ; everything else applies
+    unchanged.</p>
+  <table class="hs-ready">
+    <thead><tr><th style="width:22%">Item</th><th style="width:19%">Default on HotSpot</th><th>Flag / config / tool</th><th style="width:18%">When / restart</th></tr></thead>
+    <tbody>
+      <tr><td>Heap dump on <code>OutOfMemoryError</code></td><td><span class="def off">off</span></td><td><code>-XX:+HeapDumpOnOutOfMemoryError</code>. Fires on the <b>first</b> OOM of a JVM only, never for direct-buffer OOMs</td><td><span class="tw start">start-up · restart</span></td></tr>
+      <tr><td>Unique OOM dump name per start</td><td><span class="def off">off</span><br><code>java_pid1.hprof</code>, never overwritten</td><td><code>-XX:HeapDumpPath=/dumps/java_oom.$(date …).hprof</code> in the entrypoint</td><td><span class="tw build">image build</span></td></tr>
+      <tr><td>Exit after the OOM dump</td><td><span class="def off">off</span></td><td><code>-XX:+ExitOnOutOfMemoryError</code>, so the restarted JVM can dump again</td><td><span class="tw start">start-up · restart</span></td></tr>
+      <tr><td>Native memory accounting</td><td><span class="def off">off</span><br>no NATIVEMEMINFO equivalent</td><td><code>-XX:NativeMemoryTracking=summary</code>, then <code>jcmd 1 VM.native_memory summary</code></td><td><span class="tw start">start-up · restart</span></td></tr>
+      <tr><td>GC log</td><td><span class="def off">off</span></td><td><code>-Xlog:gc*:file=/dumps/gc.%t.log:…:filecount=5,filesize=20m</code> (<code>%t</code> = start time)</td><td><span class="tw start">start-up · restart</span><br>or <span class="tw live">runtime · no restart</span> <code>jcmd 1 VM.log</code></td></tr>
+      <tr><td>On-demand heap dump</td><td><span class="def off">off</span><br>SIGQUIT = threads on stdout</td><td><code>jcmd 1 GC.heap_dump -gz=1 …</code> from outside, so the image must be a <b>JDK</b></td><td><span class="tw build">image build</span></td></tr>
+      <tr><td>Headroom for the dump itself</td><td><span class="def na">n/a</span></td><td>~30 MiB extra while dumping; dump without a full GC near the limit (the guardian does both)</td><td><span class="tw start">start-up · restart</span></td></tr>
+      <tr><td><code>jps</code> / <code>jstat</code> visibility</td><td><span class="def off">off</span><br>for a UID without a name</td><td>an <code>/etc/passwd</code> entry for the runtime UID, so HotSpot writes <code>hsperfdata</code></td><td><span class="tw build">image build</span></td></tr>
+      <tr><td>Collector choice</td><td><span class="def var">varies</span><br>Serial below 2 CPUs / 1792 MiB</td><td><code>-XX:+UseG1GC</code> (or another) set explicitly</td><td><span class="tw start">start-up · restart</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>HotSpot artefacts in LeakLab</h2>
+  <table>
+    <thead><tr><th style="width:24%">OpenJ9</th><th style="width:46%">HotSpot</th><th>Produced by</th></tr></thead>
+    <tbody>
+      <tr><td><code>heapdump.*.phd</code></td><td><code>heapdump.*.hprof</code> (in-app), <code>heapdump.jcmd.*.hprof.gz</code> (evidence script), <code>java_oom.*.hprof</code> (OOM)</td><td>UI / API, guardian, <code>collect-evidence.sh</code>, the JVM</td></tr>
+      <tr><td><code>javacore.*.txt</code></td><td><code>vmreport.*.txt</code>: jcmd <code>VM.command_line</code>, <code>VM.flags</code>, <code>VM.native_memory summary</code>, <code>Thread.print</code></td><td>the <i>VM report</i> button, guardian, evidence script</td></tr>
+      <tr><td><code>verbosegc.&lt;start&gt;.*.log</code></td><td><code>gc.&lt;start&gt;.log</code></td><td>the JVM</td></tr>
+    </tbody>
+  </table>
+  <p>The analysis stage (Part E) reads both sets: <code>gc-trend.sh</code> parses unified GC logs ("Pause Full" and G1
+    "Pause Remark" are the live-set samples), <code>nativemem-diff.sh</code> diffs NMT summaries, and reports are only
+    diffed when they come from the same JVM instance (the process start time in <code>/proc/1/stat</code>).</p>
+
+  <div class="box arch nobreak"><div class="label">Architect's note</div>
+    <p>The same <code>MaxRAMPercentage</code> produced an OOMKill on one JVM and a survivable OOM on the other. Size
+      from a <i>measured</i> non-heap footprint for the JVM you actually run, and re-measure when you change vendor,
+      collector or container size. Readiness also differs per JVM: the matrix in 7.5 is for OpenJ9, and
+      the table above lists what changes on HotSpot.</p></div>
+</section>

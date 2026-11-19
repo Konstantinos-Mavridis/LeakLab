@@ -1,0 +1,21 @@
+# MAT> immediate_dominators byte[]
+
+Class Name                                                 | Objects | Dominated Objects | Shallow Heap | Dom. Shallow Heap
+----------------------------------------------------------------------------------------------------------------------------
+io.leaklab.leak.SessionContext                             |     971 |             1,942 |       31,072 |       254,572,888
+io.leaklab.load.LoadEngine                                 |       1 |                 2 |           64 |        25,165,880
+io.leaklab.load.LoadEngine_ClientProxy                     |       1 |                 1 |           72 |        25,165,832
+<ROOT>                                                     |       1 |            25,848 |            0 |         1,385,312
+io.netty.buffer.PoolChunk                                  |       2 |                 2 |          160 |           131,088
+io.quarkus.bootstrap.runner.RunnerClassLoader              |       1 |             2,229 |          136 |           110,784
+byte[][]                                                   |       3 |               857 |        3,456 |           100,544
+io.quarkus.bootstrap.runner.JarResource                    |     136 |               358 |        3,264 |            29,568
+io.smallrye.config.ConfigMappings$ConfigClass              |      18 |               350 |          432 |            17,808
+com.fasterxml.jackson.core.util.BufferRecycler             |       1 |                 2 |           24 |            16,016
+io.quarkus.bootstrap.runner.JarResource$JarUrlStreamHandler|     136 |               136 |        2,176 |            11,680
+io.netty.util.AsciiString                                  |     295 |               464 |        9,440 |            10,248
+io.quarkus.runtime.StartupContext                          |       1 |               126 |           32 |             8,992
+io.smallrye.config.PropertyNamesMatcher$Node               |     413 |               413 |       13,216 |             8,816
+org.jboss.logmanager.FastCopyHashMap$Entry                 |     236 |               236 |        5,664 |             5,584
+Total: 15 entries                                          |   2,216 |            32,966 |       69,208 |       306,741,040
+----------------------------------------------------------------------------------------------------------------------------

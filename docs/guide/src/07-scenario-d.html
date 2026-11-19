@@ -1,0 +1,199 @@
+<section class="part" id="scenario-d">
+  <div class="num">D</div>
+  <div class="kicker">Scenario D · port 8083</div>
+  <h1>native: the leak the heap can't see</h1>
+  <div class="bar"></div>
+  <p class="lead">Everything the JVM can cap is capped, heap and direct memory, and a leak in native memory that no
+    JVM limit governs. The heap dump comes
+    back clean, and the evidence is somewhere else. This scenario also shows the guardian pattern capturing evidence
+    seconds before an OOMKill.</p>
+  <ul class="inpart">
+    <li>D1 Configuration and verdict</li><li>D2 Native allocation through FFM</li><li>D3 What each instrument shows</li>
+    <li>D4 The guardian fires</li><li>D5 The kill</li><li>D6 Analysis</li>
+  </ul>
+</section>
+
+<section>
+  <div class="step" id="d1"><div class="step-head"><span class="step-no">D1</span><h3>Configuration and verdict</h3><span class="when">compose: native</span></div>
+<pre>mem_limit: 768m    memswap_limit: 768m
+JAVA_OPTS: "-XX:MaxRAMPercentage=50 -XX:MaxDirectMemorySize=64m"   <span class="c"># heap 384 MiB, direct 64 MiB</span>
+LEAKLAB_GUARDIAN_THRESHOLD: "0.88"</pre>
+    <div class="box tech"><div class="label">Technically</div><p>384 MiB heap + ~75 MiB non-heap + a 63 MiB direct
+      allowance = 522 MiB projected, 68 % of 768 MiB: <span class="pill ok">SIZED</span> (real verdict, Semeru). Unlike
+      Scenario C, every pool the JVM <i>can</i> cap is capped. The verdict can't account for native allocations that
+      don't exist yet and that no JVM option limits. The UI's live signal,
+      which watches trends rather than configuration, is what catches this scenario.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The storage-room rule is sensible, and there's plenty
+      of floor left. But someone has started stacking crates in the living room, and the tenant's storage rule
+      doesn't cover the living room at all.</p></div>
+  </div>
+
+  <div class="step" id="d2"><div class="step-head"><span class="step-no">D2</span><h3>Native allocation through FFM</h3><span class="when">target "Native" · NativeMemoryVault</span></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <ol>
+        <li>The <b>Foreign Function &amp; Memory API</b> (FFM, <code>java.lang.foreign</code>, final since Java 22) lets
+          Java code allocate and access memory outside the heap. It is the modern, safe replacement for
+          <code>sun.misc.Unsafe</code> and much JNI. On <b>Java 17 and 21</b> FFM is not final yet (an incubator
+          and a preview API), so those builds allocate with <code>Unsafe.allocateMemory</code> and <code>setMemory</code>
+          instead. Below the API
+          it's the same path, and the evidence is identical.</li>
+        <li><code>Arena.ofShared().allocate(bytes, 64)</code> obtains native memory from the C allocator through the
+          JDK's internal unsafe allocation path, and returns a <code>MemorySegment</code>. The memory lives until the
+          arena is <b>closed</b>.</li>
+        <li><code>segment.fill((byte) 0x5A)</code> writes every byte, so every page becomes resident and is charged to
+          the cgroup.</li>
+        <li>On the leaking path the arena is stored in a static deque and never closed. On the churn path a
+          confined arena is closed immediately (try-with-resources), so its memory is freed.</li>
+        <li>On the heap, each leak costs only small <code>Arena</code>/<code>MemorySegment</code> objects (a few
+          hundred bytes), while each costs 512 KiB of native memory. The heap barely notices.</li>
+      </ol></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Instead of boxes in the storage room, the tenant now
+      orders big crates that are delivered straight into the living room. In the storage room they only keep a
+      small <i>receipt</i> for each crate. The receipts weigh nothing, but the crates fill the apartment.</p></div>
+    <div class="box why"><div class="label">What this represents</div><p>Real native leaks come from JNI libraries
+      (image processing, compression, crypto, database drivers), off-heap caches, Netty's pooled allocators
+      misconfigured or not released, unclosed native resources, and glibc malloc arena growth under many threads.
+      FFM gives the lab a clean, reproducible stand-in for all of them.</p></div>
+  </div>
+
+  <div class="step" id="d3"><div class="step-head"><span class="step-no">D3</span><h3>What each instrument shows</h3><span class="when">20 MiB/s of native growth</span></div>
+    <table>
+      <thead><tr><th style="width:28%">Instrument</th><th style="width:30%">Reading</th><th>Interpretation</th></tr></thead>
+      <tbody>
+        <tr><td>Java heap, live set after GC</td><td><span class="pill ok">flat</span></td><td>The heap is not the problem. Heap dashboards alone would say "healthy".</td></tr>
+        <tr><td>GC activity</td><td>normal</td><td>No allocation pressure on the heap</td></tr>
+        <tr><td>Process RSS, working set</td><td><span class="pill bad">rising</span> ~20 MiB/s</td><td>Someone is consuming resident memory</td></tr>
+        <tr><td>Timeline</td><td>pink "Native (FFM)" layer grows ("Native (Unsafe)" on Java 17 and 21)</td><td>Located: native, outside every JVM cap</td></tr>
+        <tr><td>Live signal</td><td>"Off-heap leak signature"</td><td>Non-heap footprint slope ≫ live-set slope</td></tr>
+        <tr><td>Kernel's view</td><td><code>max</code> climbs near the end</td><td>The kernel is reclaiming at the limit</td></tr>
+      </tbody>
+    </table>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The storage-room meter says all is fine. The landlord's
+      tape measure says the apartment is filling up fast. When those two disagree, the problem is outside the storage
+      room.</p></div>
+    <div class="box arch"><div class="label">Architect's note</div><p>This is why platform dashboards must show
+      <b>container working set next to JVM heap</b>. The gap between them,
+      <code>working_set − heap_used</code>, is the native footprint, and its trend is the off-heap leak detector.</p></div>
+  </div>
+
+  <div class="step" id="d4"><div class="step-head"><span class="step-no">D4</span><h3>The guardian fires</h3><span class="when">09:57:47 · 88 % of the limit</span></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <ol>
+        <li><code>OomGuardian</code> runs every second on the Quarkus scheduler. It reads the cgroup and computes
+          <code>pressure = working set / memory.max</code>.</li>
+        <li>When pressure is ≥ 0.88 and the guardian is armed, it disarms, logs a CRITICAL journal entry, then writes a
+          <b>javacore first</b> (cheap, and it contains NATIVEMEMINFO, the evidence that matters for a native leak)
+          and a <b>PHD second</b>.</li>
+        <li>It re-arms only when pressure drops below 0.75, so it doesn't fire on every tick.</li>
+      </ol></div>
+    <div class="box lab"><div class="label">In the lab · real container log</div>
+<pre>WARN  javacore dump written by guardian in <span class="g">98 ms</span>: javacore.native.20261017.095747.1.txt (1.0 MiB)
+JVMDUMP034I User requested Heap dump using '/dumps/heapdump.native.20261017.095748.1.phd' through com.ibm.jvm.Dump.heapDumpToFile
+JVMDUMP010I Heap dump written to /dumps/heapdump.native.20261017.095748.1.phd
+WARN  heap dump written by guardian in <span class="g">249 ms</span>: heapdump.native.20261017.095748.1.phd (2.7 MiB)</pre></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>A smoke alarm is set to go off when the apartment is
+      88 % full. When it does, it quickly writes the household report (one tenth of a second), then takes the photo
+      album (a quarter of a second), and puts both in the basement locker. Four seconds later the landlord arrives.</p></div>
+    <div class="box why"><div class="label">Why it worked, and when it wouldn't</div>
+      <p>Headroom at the threshold: 12 % of 768 MiB ≈ 92 MiB. At 20 MiB/s that is about 4.6 s of runway, and the
+        evidence took ~0.35 s plus up to 1 s of polling delay. A faster leak, a larger heap (slower dumps) or a dump
+        written to a memory-backed volume could miss the window. Tune the threshold to growth rate × (poll interval
+        + dump time), with margin.</p></div>
+  </div>
+
+  <div class="step" id="d5"><div class="step-head"><span class="step-no">D5</span><h3>The kill</h3><span class="when">09:57:52</span></div>
+    <div class="box tech"><div class="label">Technically</div><p>Identical to <a href="#b4">B4</a>: reclaim fails, memcg
+      OOM, SIGKILL, <code>OOMKilled=true</code>, exit 137, and a Docker <code>oom</code> event at 1792231072. The
+      difference is that <code>./dumps/semeru-25/native</code> now holds a javacore and a PHD from five seconds before death.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Same eviction as before, but this time the photos
+      and report are safe in the basement.</p></div>
+  </div>
+
+  <div class="step" id="d6"><div class="step-head"><span class="step-no">D6</span><h3>Analysis: the clean heap dump and NATIVEMEMINFO</h3></div>
+    <div class="box tech"><div class="label">Technically · step 1, the PHD</div><p>Opened in MAT, the heap is small and
+      unremarkable. No dominant suspect, a handful of <code>Arena</code>/<code>MemorySegment</code> objects, no
+      <code>SessionContext</code> pile. That is a <b>finding</b>, not a failure: it rules out the heap and points
+      off-heap.</p></div>
+    <div class="box lab"><div class="label">In the lab · step 2, javacore NATIVEMEMINFO (real excerpt)</div>
+<pre>1MEMUSER       JRE: 1,547,119,104 bytes / 10113 allocations
+2MEMUSER       +--VM: 682,325,096 bytes / 8138 allocations
+3MEMUSER       |  +--Memory Manager (GC): 412,066,080 bytes
+4MEMUSER       |  |  +--Java Heap: 402,714,624 bytes / 1 allocation          <span class="c"># the 384 MiB reservation</span>
+3MEMUSER       |  +--Threads: 19,295,720 bytes  (Native Stack 18,481,152)
+2MEMUSER       +--JIT: 229,961,296 bytes
+3MEMUSER       |  +--JIT Code Cache: 201,326,592 bytes / 1 allocation      <span class="c"># 192 MiB reservation</span>
+<span class="h">2MEMUSER       +--Class Libraries: 634,832,712 bytes / 1283 allocations
+4MEMUSER       |  |  +--sun.misc.Unsafe: 634,729,024 bytes / 1251 allocations
+5MEMUSER       |  |  |  +--Direct Byte Buffers: 1,116,368 bytes / 27 allocations
+5MEMUSER       |  |  |  +--Other: 633,612,656 bytes / 1224 allocations   ◀ the leak</span>
+...
+3CICGRPINFO        Memory Limit : 805306368 bytes
+3CICGRPINFO        Memory Usage : 717058048 bytes                            <span class="c"># 89 % at capture</span></pre></div>
+    <table>
+      <thead><tr><th style="width:30%">Reading</th><th>Technically</th><th style="width:32%">Like I'm five</th></tr></thead>
+      <tbody>
+        <tr><td><i>sun.misc.Unsafe → Other</i>: 604 MiB in ~1,200 allocations</td><td>Unsafe-path native allocations, which is where FFM arenas land. Size ÷ count ≈ 512 KiB each: exactly the configured payload. Category and size pattern point straight at the code path.</td><td>The report says: "living room, 1,200 crates of the same size."</td></tr>
+        <tr><td>Direct Byte Buffers: 1 MiB</td><td>Rules out NIO buffers</td><td>Not the other crate type.</td></tr>
+        <tr><td>JRE total 1.44 GiB &gt; 768 MiB limit?!</td><td>NATIVEMEMINFO counts <b>reservations</b>: the full heap reservation and the 192 MiB JIT code cache, most of it never resident. Never compare absolute totals with RSS. Compare <b>two javacores</b> and look at what grew.</td><td>The report lists rooms you've <i>booked</i>, not only rooms you've filled.</td></tr>
+        <tr><td>Memory Usage 684 MiB</td><td>The cgroup usage the JVM saw at capture time (89 %)</td><td>The tape-measure reading when the alarm fired.</td></tr>
+      </tbody>
+    </table>
+    <div class="box tech"><div class="label">Technically · step 3, if NATIVEMEMINFO shows nothing growing</div>
+      <p>The memory isn't allocated by the JVM at all: a JNI library calling <code>malloc</code> directly, or glibc
+        arena fragmentation. Use OS tools: <code>pmap -x 1 | sort -k3 -n | tail</code>,
+        <code>/proc/1/smaps_rollup</code>, jemalloc profiling (<code>LD_PRELOAD</code> +
+        <code>MALLOC_CONF=prof:true</code>). Try <code>MALLOC_ARENA_MAX=2</code>. On HotSpot the equivalent of
+        NATIVEMEMINFO is Native Memory Tracking (<code>-XX:NativeMemoryTracking=summary</code>,
+        <code>jcmd 1 VM.native_memory summary.diff</code>).</p></div>
+  </div>
+
+  <div class="box arch nobreak"><div class="label">Scenario D · key takeaways</div>
+    <ul>
+      <li>Correct heap sizing does not protect against native leaks. Only container-level monitoring sees them.</li>
+      <li>A clean heap dump plus a rising RSS is a diagnosis: off-heap.</li>
+      <li>The javacore's NATIVEMEMINFO attributes native memory by JVM component. Diff two javacores; don't read absolutes.</li>
+      <li>Capture evidence <i>before</i> the limit (guardian / alert automation), and put the javacore first.</li>
+      <li>Cap what can be capped (<code>MaxDirectMemorySize</code>, thread pools, <code>MALLOC_ARENA_MAX</code>). Measure the rest.</li>
+    </ul></div>
+</section>
+
+<section class="readiness" id="d-ready">
+  <h2>D · Forensics readiness: what must be in place to locate a native leak</h2>
+  <p>Native leaks are where OpenJ9 shines: native-memory accounting (NATIVEMEMINFO) is in every javacore with no
+    flag, and a javacore can be taken at any moment. The constraints are timing (two javacores from the same JVM,
+    taken while there's still headroom) and the OS-level tooling you need once the growth turns out to be outside the
+    JVM's own accounting.</p>
+  <div class="legend"><span>When it must be in place:</span>
+    <span class="tw build">image build</span>
+    <span class="tw start">start-up · restart</span>
+    <span class="tw live">runtime · no restart</span>
+    <span class="tw platform">platform · beforehand</span>
+    <span class="tw after">after the fact</span>
+    <span>· Lab: <span class="lab-yes">✓</span> · <span class="lab-part">◐</span> · <span class="lab-no">✗</span></span>
+  </div>
+  <table class="ready">
+    <thead><tr><th>Requirement</th><th>Default</th><th>Why it matters</th><th>How: flags, config, tools</th><th>When / restart</th><th>Lab</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="6">JVM-level native accounting</td></tr>
+      <tr><td>Two javacores from the same JVM</td><td><span class="def on">on</span><br>NATIVEMEMINFO always included</td><td>The NATIVEMEMINFO <b>delta</b> names the growing category (here +625.6 MiB in <code>sun.misc.Unsafe → Other</code>)</td><td><code>kill -QUIT 1</code> twice, minutes apart, while there's still headroom. NATIVEMEMINFO is included by default with no flag</td><td><span class="tw live">runtime · no restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>A way to deliver the signal</td><td><span class="def var">varies</span></td><td>Both javacores depend on reaching PID 1 while the container is alive</td><td>Docker: <code>docker kill -s QUIT</code>. Kubernetes: <code>kubectl exec</code> (needs a shell in the image) or an ephemeral debug container (<code>kubectl debug --target</code>); see the A table</td><td><span class="tw build">image build</span><span class="tw platform">platform</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>HotSpot equivalent: NMT</td><td><span class="def off">off</span></td><td>Without it HotSpot has no per-category native accounting</td><td><code>-XX:NativeMemoryTracking=summary</code> (about 5–10 % overhead) + <code>jcmd 1 VM.native_memory baseline</code> / <code>summary.diff</code> (needs a JDK image)</td><td><span class="tw start">start-up · restart</span><span class="tw build">image build</span></td><td>n/a</td></tr>
+      <tr><td>Pre-kill capture, javacore first</td><td><span class="def off">off</span></td><td>Catches the last state before the kill (guardian at 88 %, about 4 s before death)</td><td>Guardian or alert automation; write the javacore before the heap dump</td><td><span class="tw start">start-up · restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>RSS and working-set history</td><td><span class="def var">varies</span><br><code>/proc</code>: on; history: platform</td><td>Heap flat + RSS rising = off-heap: the first triage signal</td><td><code>/proc/1/status</code> (always available); Prometheus history of working set, heap and RSS</td><td><span class="tw platform">platform · beforehand</span></td><td class="lab-yes">✓</td></tr>
+      <tr class="group"><td colspan="6">Beyond the JVM's accounting (JNI, malloc, fragmentation)</td></tr>
+      <tr><td>Process memory maps</td><td><span class="def var">varies</span><br><code>smaps_rollup</code>: on; <code>pmap</code>: image</td><td>Find anonymous regions the JVM doesn't account for</td><td><code>cat /proc/1/smaps_rollup</code> (no setup). <code>pmap -x 1</code> needs <code>procps</code> in the image, or an ephemeral debug container: <code>kubectl debug -it &lt;pod&gt; --image=… --target=leaklab</code> (needs RBAC)</td><td><span class="tw live">runtime · no restart</span><span class="tw build">image build</span> (pmap)</td><td class="lab-part">◐</td></tr>
+      <tr><td>Allocator profiling</td><td><span class="def off">off</span></td><td>Stack traces of native allocations</td><td>The image ships libjemalloc; start with <code>LD_PRELOAD=…libjemalloc.so</code> and <code>MALLOC_CONF=prof:true,…</code></td><td><span class="tw build">image build</span><span class="tw start">start-up · restart</span></td><td class="lab-no">✗</td></tr>
+      <tr><td>Allocator mitigation</td><td><span class="def off">off</span><br>glibc: up to 8 arenas per core</td><td>glibc arena growth with many threads</td><td><code>MALLOC_ARENA_MAX=2</code></td><td><span class="tw start">start-up · restart</span></td><td class="lab-no">✗</td></tr>
+      <tr><td>System core</td><td><span class="def var">varies</span><br>OpenJ9 agent on; host must allow cores</td><td>Full process memory, including native contents (<code>jdmpview</code>)</td><td>OpenJ9 <code>-Xdump:system</code> (default on OOM/crash) or <code>Dump.systemDumpToFile</code>; the node's <code>core_pattern</code> and <code>ulimit -c</code> must allow cores; disk ≈ RSS</td><td><span class="tw platform">platform · beforehand</span></td><td class="lab-no">✗</td></tr>
+      <tr class="group"><td colspan="6">Analyse</td></tr>
+      <tr><td>Delta tooling and workbench</td><td><span class="def na">n/a</span></td><td>Turns two javacores into a verdict; confirms the heap is clean</td><td><code>nativemem-diff.sh</code>, MAT + DTFJ (<code>leaklab-analyzer</code>)</td><td><span class="tw after">after the fact</span></td><td class="lab-yes">✓</td></tr>
+    </tbody>
+  </table>
+  <p class="small"><span class="lab-no">✗</span> System cores fail under Docker Desktop (<code>JVMDUMP012E</code>) because the
+    host's core-dump settings don't allow them. jemalloc and <code>MALLOC_ARENA_MAX</code> aren't needed for the lab's
+    FFM leak, which NATIVEMEMINFO already attributes.</p>
+  <div class="box eli5"><div class="label">Like I'm five</div><p>The good news: the tenant's written report always
+    includes a room-by-room floor plan, and you can ask for one any time. Ask twice, a few minutes apart, and compare.
+    If the growing room isn't on the tenant's plan at all, you need the landlord's own tools to measure it, and those
+    have to be brought into the building in advance.</p></div>
+</section>

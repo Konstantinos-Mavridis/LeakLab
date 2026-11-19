@@ -1,0 +1,404 @@
+<section class="part" id="foundations">
+  <div class="num">1</div>
+  <div class="kicker">Part 1</div>
+  <h1>Foundations</h1>
+  <div class="bar"></div>
+  <p class="lead">Ten ideas that every later step relies on. Each one is a few minutes of reading. Together they
+    give you the working vocabulary of a JVM performance engineer.</p>
+  <ul class="inpart">
+    <li>1.1 Process memory</li><li>1.2 Containers and cgroups</li><li>1.3 JVM, OpenJ9, Semeru</li>
+    <li>1.4 JVM memory areas</li><li>1.5 Garbage collection</li><li>1.6 Leaks</li><li>1.7 OutOfMemoryError</li>
+    <li>1.8 Diagnostic artefacts</li><li>1.9 Heap analysis concepts</li><li>1.10 Platform building blocks</li>
+  </ul>
+</section>
+
+<!-- ================================================================ 1.1 -->
+<section id="f-memory">
+  <h2>1.1 Process memory: reserved, committed, resident</h2>
+  <p>"How much memory does this process use?" has at least three correct answers. Confusing them is the most common
+    source of wrong conclusions in this field.</p>
+  <figure>
+    <svg viewBox="0 0 700 150" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10" y="20" width="680" height="34" rx="6" fill="#f1f5f9" stroke="#94a3b8"/>
+      <text x="20" y="42" font-size="11" fill="#334155" font-weight="700">Reserved (virtual address space)</text>
+      <text x="680" y="42" font-size="10" fill="#64748b" text-anchor="end">promised addresses · costs nothing yet</text>
+      <rect x="10" y="62" width="430" height="34" rx="6" fill="#dbeafe" stroke="#3b82f6"/>
+      <text x="20" y="84" font-size="11" fill="#1e3a8a" font-weight="700">Committed</text>
+      <text x="430" y="84" font-size="10" fill="#1e3a8a" text-anchor="end">OS agreed to back it, if touched</text>
+      <rect x="10" y="104" width="250" height="34" rx="6" fill="#0ea5e9"/>
+      <text x="20" y="126" font-size="11" fill="#fff" font-weight="700">Resident (RSS)</text>
+      <text x="252" y="126" font-size="10" fill="#e0f2fe" text-anchor="end">real RAM pages, touched</text>
+      <text x="300" y="126" font-size="10.5" fill="#be123c" font-weight="700">← this is what the container limit charges</text>
+    </svg>
+    <figcaption><b>Figure 1.1</b> The three meanings of "used". Only the bottom one costs physical memory and counts toward
+      the cgroup limit.</figcaption>
+  </figure>
+  <div class="box tech"><div class="label">Technically</div>
+    <ul>
+      <li><b>Reserved</b>: virtual address ranges a process has mapped (<code>mmap</code> with no access, or untouched).
+        On 64-bit systems this is cheap and can be enormous. <code>VmSize</code> in <code>/proc/&lt;pid&gt;/status</code>.</li>
+      <li><b>Committed</b>: memory the process has asked the OS to make usable. With Linux overcommit this is still
+        mostly a promise. JVM MXBeans report "committed" per pool.</li>
+      <li><b>Resident (RSS)</b>: pages that are actually in physical RAM. A page becomes resident the first time it is
+        touched (a <i>page fault</i> allocates it). <code>VmRSS</code>; the peak is <code>VmHWM</code>.</li>
+    </ul>
+    <p>The memory cgroup charges a page to the container <b>when it is faulted in</b>. That is why LeakLab's leaking code
+      writes one byte into every 4 KiB page it allocates: an untouched allocation would never show up in RSS or in the
+      cgroup's usage.</p></div>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p><b>Reserved</b> is putting your name on a list for a parking spot. <b>Committed</b> is the attendant saying
+      "yes, you may park there". <b>Resident</b> is your car actually standing in the spot. The building only runs out
+      of space when real cars are parked. Lists and promises take no room.</p></div>
+  <div class="box lab"><div class="label">In the lab · a real example of the difference</div>
+    <p>On OpenJ9 the <code>JIT code cache</code> pool reported <b>committed = 256 MiB</b> while <b>used = 2.6 MiB</b>,
+      and the whole process RSS was only <b>93 MiB</b>. A first version of LeakLab added "committed" numbers and
+      concluded the JVM needed 333 MiB outside the heap, which was clearly impossible. The fix was to measure RSS.
+      Lesson: <i>committed is not resident</i>.</p></div>
+  <div class="box arch"><div class="label">Architect's note</div>
+    <p>When you budget memory for containers, budget <b>resident</b> memory. Dashboards that show "virtual" or
+      "committed" will mislead you. In Kubernetes, the metric that matters is
+      <code>container_memory_working_set_bytes</code>, which is close to RSS plus active page cache (see 1.2).</p></div>
+</section>
+
+<!-- ================================================================ 1.2 -->
+<section id="f-containers">
+  <h2>1.2 Containers, cgroups and the OOM killer</h2>
+  <p>A container is not a small virtual machine. It is an ordinary Linux process with two kernel features applied:
+    <b>namespaces</b> (what it can <i>see</i>) and <b>control groups</b> (what it can <i>use</i>). Memory limits come
+    from the second.</p>
+  <div class="box tech"><div class="label">Technically</div>
+    <ul>
+      <li><b>Namespaces</b> isolate views: PID, network, mount, user, and so on. That is why the JVM is PID 1 inside
+        the container.</li>
+      <li><b>cgroup v2</b> (the default on current Docker, Kubernetes and OpenShift 4.14+) exposes memory control as
+        files in <code>/sys/fs/cgroup</code>:
+        <code>memory.max</code> (hard limit), <code>memory.current</code> (charged bytes),
+        <code>memory.stat</code> (breakdown), <code>memory.peak</code> (high-water mark) and
+        <code>memory.events</code> (counters: <code>max</code>, <code>oom</code>, <code>oom_kill</code>).</li>
+      <li>Charged memory includes anonymous memory (heap, stacks, malloc), <b>page cache</b> for files the container
+        reads and writes, and some kernel memory. Page cache is mostly reclaimable. tmpfs (<code>/dev/shm</code>,
+        <code>emptyDir.medium: Memory</code>) is not.</li>
+      <li><b>Working set</b> = <code>memory.current − inactive_file</code>. This is what the kubelet reports and acts
+        on. LeakLab computes it the same way.</li>
+      <li>When a page fault would push usage over <code>memory.max</code>, the kernel first tries to <b>reclaim</b>:
+        it evicts clean page cache and swaps if swap is allowed. Each such event increments <code>memory.events: max</code>.
+        If reclaim cannot free enough, the <b>memory-cgroup OOM killer</b> picks a process in that cgroup (highest
+        <code>oom_score</code>) and sends it <b>SIGKILL</b> (signal 9). The kernel log records
+        <code>oom-kill: constraint=CONSTRAINT_MEMCG … Killed process &lt;pid&gt; (java)</code>.</li>
+      <li>The container runtime sees the process exit with status <b>137 = 128 + 9</b> and records it as
+        <code>OOMKilled</code>.</li>
+    </ul></div>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>The building has many apartments. The landlord measures each apartment's floor with a tape measure (the cgroup).
+      When you bring in one more box than fits, the landlord first tidies your hallway (throws out old newspapers:
+      page cache). If there's still no room, the landlord doesn't negotiate. They pick the biggest thing in your
+      apartment, which is usually <i>you</i>, and put it on the street. The note on the door just says
+      "137".</p></div>
+  <div class="box why"><div class="label">Why this mechanism exists</div>
+    <p>Limits protect neighbours. Without them, one leaking service could starve every other workload on the node.
+      SIGKILL is used because it is the only signal a misbehaving process cannot ignore. That robustness is exactly
+      why the process can do nothing to save evidence.</p></div>
+  <table class="cast"><caption>Cast</caption>
+    <thead><tr><th>Component</th><th>Represents</th><th>Role</th></tr></thead>
+    <tbody>
+      <tr><td>cgroup (memory controller)</td><td>A kernel accounting group</td><td>Counts and caps every resident page of the container's processes</td></tr>
+      <tr><td>OOM killer</td><td>Kernel last-resort routine</td><td>Chooses and SIGKILLs a process when reclaim fails</td></tr>
+      <tr><td>Container runtime (containerd / CRI-O)</td><td>The software that starts containers</td><td>Creates the cgroup with the limit; records exit code and the OOM flag</td></tr>
+      <tr><td>Docker / kubelet</td><td>Node agent</td><td>Translates <code>mem_limit</code> / <code>resources.limits.memory</code> into <code>memory.max</code>; restarts or reports the dead container</td></tr>
+    </tbody>
+  </table>
+  <div class="box warn"><div class="label">Pitfall</div>
+    <p><b>Exit code 137 alone does not prove a memory problem.</b> It only means SIGKILL. A failed liveness probe,
+      <code>docker kill</code> or a stop-timeout also produce 137. The proof is the runtime's <b>reason</b> field
+      (<code>OOMKilled</code>) or the kernel log line.</p></div>
+</section>
+
+<!-- ================================================================ 1.3 -->
+<section id="f-jvm">
+  <h2>1.3 The JVM, OpenJ9 and IBM Semeru</h2>
+  <div class="box tech"><div class="label">Technically</div>
+    <p>The <b>Java Virtual Machine</b> runs Java bytecode. It loads classes, interprets them at first, then
+      <b>JIT-compiles</b> hot methods to native code. It manages memory automatically with a <b>garbage collector</b>.
+      Two production JVM implementations matter:</p>
+    <ul>
+      <li><b>HotSpot</b>: the JVM in Oracle JDK, Temurin, Red Hat build of OpenJDK, and others.</li>
+      <li><b>Eclipse OpenJ9</b>: originally IBM's J9. It is tuned for a small footprint and fast start-up, and has its
+        own diagnostics (javacore, PHD, <code>-Xdump</code>) and its own GC policies (default <b>gencon</b>).</li>
+    </ul>
+    <p><b>IBM Semeru Runtime Open Edition</b> is IBM's free distribution: OpenJDK class libraries + OpenJ9 VM.
+      LeakLab's default JVM is HotSpot, the <b>Red Hat build of OpenJDK 21</b>; the evidence in this guide comes
+      from <b>Semeru 25.0.4 (Java 25 LTS)</b>, and every JVM runs on Java 17, 21 and 25. The Java code is identical on
+      both JVMs and all versions. Memory pool names, dump formats and tooling differ.</p></div>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>Java programs are written in a language computers can't run directly. The JVM is a translator who reads the
+      program aloud to the computer. It gets faster the more it reads the same sentences (that's the JIT), and it
+      keeps the room tidy as it goes (that's the GC). HotSpot and OpenJ9 are two different translators. They speak
+      the same language, but they keep their notebooks in different formats.</p></div>
+  <div class="box arch"><div class="label">Architect's note</div>
+    <p>Diagnostics are part of the runtime choice. Choosing Semeru means your runbooks, tooling (MAT + DTFJ, GCMV) and
+      team skills must cover PHD, javacore and <code>-Xdump</code>. Don't write a HotSpot-only runbook
+      (<code>jmap</code>, NMT, HPROF) for an OpenJ9 fleet. Part 1.8 maps one to the other.</p></div>
+</section>
+
+<!-- ================================================================ 1.4 -->
+<section id="f-areas">
+  <h2>1.4 Where a JVM keeps things</h2>
+  <table>
+    <thead><tr><th style="width:20%">Area</th><th style="width:34%">What lives there</th><th style="width:22%">Capped by</th><th>OpenJ9 names you'll see</th></tr></thead>
+    <tbody>
+      <tr><td>Java heap</td><td>Every Java object and array your code creates with <code>new</code></td><td><code>-Xmx</code> or <code>-XX:MaxRAMPercentage</code></td><td><code>nursery-allocate</code>, <code>nursery-survivor</code>, <code>tenured-SOA</code>, <code>tenured-LOA</code></td></tr>
+      <tr><td>Class metadata</td><td>Loaded classes, method bytecode, constant pools</td><td>Practically unbounded</td><td><code>class storage</code></td></tr>
+      <tr><td>JIT caches</td><td>Compiled native code and compiler metadata</td><td>Reservation size</td><td><code>JIT code cache</code>, <code>JIT data cache</code></td></tr>
+      <tr><td>Thread stacks</td><td>One native stack per thread (call frames)</td><td><code>-Xss</code> × thread count</td><td>javacore: <i>Threads → Native Stack</i></td></tr>
+      <tr><td>Direct buffers</td><td><code>ByteBuffer.allocateDirect</code> (NIO, Netty)</td><td><code>-XX:MaxDirectMemorySize</code></td><td>BufferPool "direct"; javacore <i>Direct Byte Buffers</i></td></tr>
+      <tr><td>Other native</td><td>FFM <code>Arena</code>, <code>Unsafe</code>, JNI libraries, glibc malloc arenas, GC metadata</td><td><b>Nothing in the JVM</b></td><td>javacore <i>sun.misc.Unsafe → Other</i>; otherwise invisible</td></tr>
+    </tbody>
+  </table>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>The heap is the storage room, the only room the tenant counts carefully. The rest is furniture: bookshelves
+      for instructions (class metadata), a workbench where fast tools are built (JIT), one desk per worker (thread
+      stacks), and crates kept outside the storage room (direct and native). The landlord measures <i>all</i> of it.</p></div>
+  <div class="box why"><div class="label">Why it matters here</div>
+    <p>A heap dump only photographs the storage room. Scenario D hides its leak in "other native", where no heap
+      dump and no <code>-Xmx</code> will ever see it.</p></div>
+</section>
+
+<!-- ================================================================ 1.5 -->
+<section id="f-gc">
+  <h2>1.5 Garbage collection and the live set</h2>
+  <figure>
+    <svg viewBox="0 0 700 175" xmlns="http://www.w3.org/2000/svg">
+      <text x="10" y="16" font-size="11" font-weight="700" fill="#0b3b66">OpenJ9 gencon heap</text>
+      <rect x="10" y="26" width="230" height="86" rx="8" fill="#e0f2fe" stroke="#0369a1"/>
+      <text x="125" y="44" font-size="11" text-anchor="middle" font-weight="700" fill="#0c4a6e">Nursery (new space)</text>
+      <rect x="22" y="54" width="130" height="48" rx="5" fill="#0ea5e9"/><text x="87" y="76" font-size="10" text-anchor="middle" fill="#fff" font-weight="700">allocate</text><text x="87" y="91" font-size="8.5" text-anchor="middle" fill="#e0f2fe">TLH bump allocation</text>
+      <rect x="160" y="54" width="70" height="48" rx="5" fill="#7dd3fc"/><text x="195" y="82" font-size="10" text-anchor="middle" fill="#0c4a6e" font-weight="700">survivor</text>
+      <rect x="290" y="26" width="400" height="86" rx="8" fill="#f1f5f9" stroke="#475569"/>
+      <text x="490" y="44" font-size="11" text-anchor="middle" font-weight="700" fill="#1e293b">Tenure (old space)</text>
+      <rect x="302" y="54" width="290" height="48" rx="5" fill="#cbd5e1"/><text x="447" y="82" font-size="10" text-anchor="middle" fill="#1e293b" font-weight="700">SOA · small object area</text>
+      <rect x="600" y="54" width="80" height="48" rx="5" fill="#94a3b8"/><text x="640" y="82" font-size="10" text-anchor="middle" fill="#fff" font-weight="700">LOA</text>
+      <path d="M240 70 L288 70" stroke="#0b3b66" stroke-width="2" marker-end="url(#ar)"/>
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#0b3b66"/></marker></defs>
+      <text x="264" y="64" font-size="8.5" text-anchor="middle" fill="#0b3b66">tenure</text>
+      <text x="10" y="134" font-size="10" fill="#334155"><tspan font-weight="700" fill="#0369a1">Scavenge (minor GC)</tspan>: copies live nursery objects to survivor; survivors that age are promoted to tenure. Frequent, short pauses.</text>
+      <text x="10" y="152" font-size="10" fill="#334155"><tspan font-weight="700" fill="#475569">Global GC (major)</tspan>: marks reachable objects in the whole heap (mostly concurrently), sweeps the rest, occasionally compacts.</text>
+      <text x="10" y="170" font-size="10" fill="#334155"><tspan font-weight="700" fill="#10b981">Live set</tspan> = heap occupancy right after a global GC = what the application truly keeps.</text>
+    </svg>
+    <figcaption><b>Figure 1.2</b> The generational heap under OpenJ9's default <i>gencon</i> policy. HotSpot's G1 uses
+      different names (Eden, Survivor, Old) for the same idea.</figcaption>
+  </figure>
+  <div class="box tech"><div class="label">Technically</div>
+    <ul>
+      <li><b>Reachability</b> decides what's kept. A GC starts from <b>GC roots</b> (static fields of loaded classes,
+        local variables on thread stacks, JNI references, active monitors) and follows every reference. Whatever it
+        can't reach is garbage, however large.</li>
+      <li><b>Generational hypothesis</b>: most objects die young. gencon allocates new objects in the <b>nursery</b>
+        using per-thread <b>TLH</b>s (thread-local heaps: lock-free bump-pointer allocation). When the nursery fills,
+        a <b>scavenge</b> copies the few survivors and discards the rest. Objects that survive several scavenges are
+        <b>tenured</b>.</li>
+      <li>Tenure is collected by <b>global GC</b>: a concurrent mark, a short stop-the-world final phase, a sweep, and
+        compaction when fragmented. OpenJ9 <b>expands</b> the heap after a GC when free space is below
+        <code>-Xminf</code> (30 % by default), up to <code>-Xmx</code>.</li>
+      <li>The <b>live set</b> (heap after a global GC) is the true size of what the application holds. Plotted over
+        time, a healthy service draws a <b>sawtooth with a flat floor</b>.</li>
+    </ul></div>
+  <figure>
+    <svg viewBox="0 0 700 120" xmlns="http://www.w3.org/2000/svg">
+      <text x="10" y="14" font-size="10.5" font-weight="700" fill="#0f7a55">Healthy: floor flat</text>
+      <path d="M10 100 L50 40 L52 92 L92 38 L94 92 L134 40 L136 93 L176 38 L178 92 L218 40 L220 92 L260 39 L262 92 L300 42 L302 92 L330 70" fill="none" stroke="#0ea5e9" stroke-width="1.8"/>
+      <path d="M52 92 L94 92 L136 93 L178 92 L220 92 L262 92 L302 92" fill="none" stroke="#10b981" stroke-width="2.5"/>
+      <text x="370" y="14" font-size="10.5" font-weight="700" fill="#be123c">Leaking: floor rises</text>
+      <path d="M370 104 L410 50 L412 98 L452 44 L454 90 L494 38 L496 80 L536 32 L538 70 L578 28 L580 60 L620 24 L622 48 L660 22 L662 36 L690 22" fill="none" stroke="#0ea5e9" stroke-width="1.8"/>
+      <path d="M412 98 L454 90 L496 80 L538 70 L580 60 L622 48 L662 36" fill="none" stroke="#10b981" stroke-width="2.5"/>
+      <line x1="370" y1="20" x2="690" y2="20" stroke="#334155" stroke-dasharray="4 3"/><text x="690" y="17" font-size="8.5" text-anchor="end" fill="#334155">-Xmx</text>
+    </svg>
+    <figcaption><b>Figure 1.3</b> Blue: heap used. Green: live set after each global GC. The slope of the green line is
+      the single best leak indicator. LeakLab's "Live set after GC" panel and its "Live signal" compute exactly this.</figcaption>
+  </figure>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>The cleaner comes often to the "new stuff" corner by the door. Most of it is wrapping paper, so it gets thrown
+      away quickly (scavenge). Things that are still wanted after a few visits move to the back room (tenure).
+      Sometimes the cleaner does the whole apartment (global GC). To check whether the household is hoarding, don't
+      look at the mess on a busy afternoon. Look at how full the place is <b>right after a full clean</b>. If that
+      number creeps up every week, something is hoarding.</p></div>
+  <div class="box arch"><div class="label">Architect's note</div>
+    <p>Alert on the <b>trend of the post-GC floor</b>, not on "heap usage &gt; 80 %". Heap usage is supposed to be
+      high between collections. Alerting on it creates noise that teaches teams to ignore memory alerts.</p></div>
+</section>
+
+<!-- ================================================================ 1.6 -->
+<section id="f-leak">
+  <h2>1.6 What a "leak" means in Java</h2>
+  <figure>
+    <svg viewBox="0 0 700 150" xmlns="http://www.w3.org/2000/svg">
+      <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#475569"/></marker></defs>
+      <rect x="10" y="50" width="120" height="44" rx="6" fill="#0b3b66"/><text x="70" y="70" fill="#fff" font-size="10" text-anchor="middle" font-weight="700">GC root</text><text x="70" y="84" fill="#cbd5e1" font-size="8.5" text-anchor="middle">static field SESSIONS</text>
+      <rect x="170" y="50" width="120" height="44" rx="6" fill="#e0f2fe" stroke="#0369a1"/><text x="230" y="70" font-size="10" text-anchor="middle" font-weight="700" fill="#0c4a6e">ConcurrentHashMap</text><text x="230" y="84" font-size="8.5" text-anchor="middle" fill="#0c4a6e">the "cache"</text>
+      <path d="M130 72 L168 72" stroke="#475569" stroke-width="1.6" marker-end="url(#ar2)"/>
+      <g fill="#fef3c7" stroke="#b45309">
+        <rect x="330" y="10" width="110" height="30" rx="5"/><rect x="330" y="50" width="110" height="30" rx="5"/><rect x="330" y="90" width="110" height="30" rx="5"/>
+      </g>
+      <g font-size="9" text-anchor="middle" fill="#7c2d12"><text x="385" y="29">SessionContext #1</text><text x="385" y="69">SessionContext #2</text><text x="385" y="109">SessionContext #N</text></g>
+      <path d="M290 66 L328 28 M290 72 L328 66 M290 78 L328 104" stroke="#475569" stroke-width="1.3" fill="none" marker-end="url(#ar2)"/>
+      <g fill="#bae6fd"><rect x="480" y="10" width="90" height="30" rx="5"/><rect x="480" y="50" width="90" height="30" rx="5"/><rect x="480" y="90" width="90" height="30" rx="5"/></g>
+      <g font-size="9" text-anchor="middle" fill="#0c4a6e"><text x="525" y="29">byte[512 KiB]</text><text x="525" y="69">byte[512 KiB]</text><text x="525" y="109">byte[512 KiB]</text></g>
+      <path d="M440 25 L478 25 M440 65 L478 65 M440 105 L478 105" stroke="#475569" stroke-width="1.3" marker-end="url(#ar2)"/>
+      <rect x="600" y="50" width="90" height="44" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-dasharray="4 3"/><text x="645" y="70" font-size="9" text-anchor="middle" fill="#64748b">unreachable</text><text x="645" y="84" font-size="9" text-anchor="middle" fill="#64748b">→ collected</text>
+      <text x="10" y="142" font-size="9.5" fill="#334155">Everything on the chain from a GC root is retained forever. The GC is working correctly: the program asked to keep it.</text>
+    </svg>
+    <figcaption><b>Figure 1.4</b> The LeakLab heap leak as a reference graph.</figcaption>
+  </figure>
+  <div class="box tech"><div class="label">Technically</div>
+    <p>In a garbage-collected language a leak is <b>unintended reachability</b>: objects the program will never use
+      again but still references from a GC root, so the collector must keep them. Typical forms are unbounded
+      caches and maps (LeakLab's case), listeners that are registered but never removed, <code>ThreadLocal</code>s on
+      pooled threads, collections used as queues without consumers, and class-loader leaks on redeploy. The defining
+      property is that retained size grows with <b>cumulative</b> work (total requests served), not with
+      <b>concurrent</b> work.</p></div>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>The cleaner is very obedient: anything tied to a hook stays. Someone tied a big basket to a hook and puts every
+      receipt into it "just in case", but never looks at them again. The cleaner isn't broken; they were told to keep
+      it. The basket grows a little with every customer until the room is full.</p></div>
+  <div class="box why"><div class="label">Why LeakLab's leak is realistic</div>
+    <p><code>CustomerSessionCache</code> is meant to answer retried requests from memory, but it is keyed by
+      <code>requestId</code>, which is unique per request. It can never produce a cache hit and never evicts. This
+      "cache keyed by a unique ID" bug appears regularly in production code reviews.</p></div>
+</section>
+
+<!-- ================================================================ 1.7 -->
+<section id="f-oom">
+  <h2>1.7 OutOfMemoryError</h2>
+  <div class="box tech"><div class="label">Technically</div>
+    <p><code>java.lang.OutOfMemoryError</code> is thrown <i>by the JVM</i> when an allocation can't be satisfied within
+      a limit the JVM enforces. The message tells you which limit:</p>
+    <table>
+      <thead><tr><th>Message</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>Java heap space</code></td><td>After a full (global) collection and compaction, there is still no room for the object within <code>-Xmx</code>. OpenJ9 also throws this when the JVM spends nearly all of its time in GC (excessive GC detection).</td></tr>
+        <tr><td><code>Cannot reserve … bytes of direct buffer memory</code> (older JDKs: <code>Direct buffer memory</code>)</td><td><code>-XX:MaxDirectMemorySize</code> would be exceeded. Thrown by Java code in <code>java.nio.Bits</code>, not by the VM, so the default OOM dump agents (and HotSpot's <code>HeapDumpOnOutOfMemoryError</code>) don't react to it (1.8)</td></tr>
+        <tr><td><code>Metaspace</code> / class storage</td><td>Class metadata exhausted (HotSpot <code>MaxMetaspaceSize</code>)</td></tr>
+        <tr><td><code>unable to create native thread</code></td><td>The OS refused a new thread (pid or thread limits, memory)</td></tr>
+      </tbody>
+    </table>
+    <p>It is an <code>Error</code>, not an <code>Exception</code>: it propagates up the stack of the <i>allocating
+      thread</i>, which is not necessarily the thread that leaked. Before it is thrown, OpenJ9's dump agents run
+      (1.8).</p></div>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>The tenant tries to put one more box in the storage room. First they ask the cleaner to do a full, careful
+      clean. If there's <i>still</i> no room, they stop and say out loud, "the storage room is full." Because they
+      are still in charge of their apartment, they can take photos and write notes before deciding what to do.</p></div>
+  <div class="box warn"><div class="label">Pitfall</div>
+    <p>A JVM that has thrown OOM is in an <b>undefined state</b>. Any thread may have failed half-way through an
+      operation. LeakLab demonstrates a nasty variant in <a href="#a9">A9</a>. Production services should normally
+      exit after the dumps are written (<code>-XX:+ExitOnOutOfMemoryError</code>) and let the platform restart them.</p></div>
+</section>
+
+<!-- ================================================================ 1.8 -->
+<section id="f-artefacts">
+  <h2>1.8 Diagnostic artefacts and dump agents</h2>
+  <table>
+    <thead><tr><th style="width:17%">Artefact</th><th style="width:21%">OpenJ9 file</th><th style="width:16%">HotSpot equivalent</th><th>What it captures · what it answers</th></tr></thead>
+    <tbody>
+      <tr><td>Heap dump</td><td><code>heapdump.*.phd</code> (Portable Heap Dump)</td><td><code>*.hprof</code></td><td>Every object, its class, size and outgoing references. PHD omits primitive values (no String contents, no field values). Answers <b>what is retained and by whom</b>.</td></tr>
+      <tr><td>Java dump (javacore)</td><td><code>javacore.*.txt</code></td><td><code>jcmd Thread.print</code> + NMT</td><td>Human-readable report: environment and cgroup, native memory by component (<code>NATIVEMEMINFO</code>), heap and GC history, all threads with stacks, locks. Answers <b>where native memory went, what threads were doing</b>.</td></tr>
+      <tr><td>System dump</td><td><code>core.*.dmp</code></td><td><code>gcore</code> core file</td><td>The entire process memory image, with full fidelity. Answers <b>anything</b>, including field values. Large (≈ RSS) and sensitive.</td></tr>
+      <tr><td>Snap trace</td><td><code>Snap.*.trc</code></td><td>(none)</td><td>The JVM's internal trace ring buffer, mainly for IBM support.</td></tr>
+      <tr><td>Verbose GC log</td><td><code>verbosegc.*.log</code> (XML)</td><td><code>-Xlog:gc*</code></td><td>One record per collection: before/after occupancy, pause times, heap size changes. Answers <b>the trend</b>.</td></tr>
+    </tbody>
+  </table>
+  <div class="box tech"><div class="label">Technically · dump agents</div>
+    <p>OpenJ9 attaches <b>dump agents</b> to <b>events</b>, configured with <code>-Xdump</code>. Out of the box, on the
+      first <code>systhrow java/lang/OutOfMemoryError</code> the JVM writes a system dump (once), and a heap dump,
+      javacore and snap trace (up to 4 times each). <code>user</code> is the event for SIGQUIT
+      (<code>kill -QUIT</code>), which by default produces a javacore. <code>systhrow</code> means "thrown by the VM
+      itself". An OOM thrown by Java code, such as the direct-buffer error, is a plain <code>throw</code> event, and
+      no default agent listens for it (verified: no dumps at all). LeakLab's image adds:</p>
+<pre>-Xdump:directory=/dumps        <span class="c"># every artefact goes to the mounted volume</span>
+-Xdump:heap:events=user        <span class="c"># kill -QUIT 1 also produces a heap dump (no jcmd needed)</span>
+<span class="c"># an OOM thrown by Java code (direct buffers), which no default agent catches:</span>
+-Xdump:java+heap:events=throw,filter=java/lang/OutOfMemoryError,msg_filter=*direct*,range=1..1
+<span class="c"># 5 rotating files, 20k GC cycles each; start time in the name survives restarts:</span>
+-Xverbosegclog:/dumps/verbosegc.%Y%m%d.%H%M%S.%pid.%seq.log,5,20000</pre>
+    <p>Dumps can also be triggered by API (<code>com.ibm.jvm.Dump.heapDumpToFile</code>, which LeakLab's buttons use),
+      by <code>jcmd</code> in JDK images, or by special events such as large allocations
+      (<code>events=allocation,filter=#256m</code>).</p></div>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>The tenant keeps a camera and notebook by the door, set to go off automatically on certain alarms: "storage
+      room full" or "someone rang the special bell (SIGQUIT)". The photo album is the heap dump, the written report is
+      the javacore, and the cleaner keeps a diary all the time (the GC log). None of it helps if the landlord evicts
+      you without warning. That's why the diary lives in a safe outside the apartment (the volume).</p></div>
+  <div class="box arch"><div class="label">Architect's note</div>
+    <p>Treat dump configuration as <b>platform standard, not an incident-time activity</b>: dump directory on a
+      persistent volume, agents enabled, GC log rotating, a tested copy-out procedure. Dumps also contain whatever the
+      application held in memory: session data, tokens, personal data. Classify them as production data, with
+      access control, encryption and retention.</p></div>
+</section>
+
+<!-- ================================================================ 1.9 -->
+<section id="f-analysis">
+  <h2>1.9 Reading a heap: retained size, dominators, GC roots</h2>
+  <figure>
+    <svg viewBox="0 0 700 140" xmlns="http://www.w3.org/2000/svg">
+      <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#475569"/></marker></defs>
+      <rect x="10" y="50" width="70" height="34" rx="5" fill="#0b3b66"/><text x="45" y="71" font-size="9.5" fill="#fff" text-anchor="middle">root</text>
+      <rect x="120" y="50" width="70" height="34" rx="5" fill="#ddd6fe" stroke="#5b3cc4" stroke-width="2"/><text x="155" y="71" font-size="10" text-anchor="middle" font-weight="700" fill="#3b1f8f">X</text>
+      <rect x="230" y="12" width="70" height="34" rx="5" fill="#e0f2fe"/><text x="265" y="33" font-size="10" text-anchor="middle">A</text>
+      <rect x="230" y="88" width="70" height="34" rx="5" fill="#e0f2fe"/><text x="265" y="109" font-size="10" text-anchor="middle">B</text>
+      <rect x="340" y="50" width="70" height="34" rx="5" fill="#e0f2fe"/><text x="375" y="71" font-size="10" text-anchor="middle">C</text>
+      <path d="M80 67 L118 67" stroke="#475569" stroke-width="1.5" marker-end="url(#ar3)"/>
+      <path d="M190 60 L228 32 M190 74 L228 102 M300 32 L338 62 M300 102 L338 74" stroke="#475569" stroke-width="1.5" fill="none" marker-end="url(#ar3)"/>
+      <text x="440" y="40" font-size="10" fill="#334155"><tspan font-weight="700">Shallow(X)</tspan> = X's own bytes (small).</text>
+      <text x="440" y="60" font-size="10" fill="#334155"><tspan font-weight="700">X dominates A, B, C</tspan>: every path from a</text>
+      <text x="440" y="74" font-size="10" fill="#334155">root to them passes through X.</text>
+      <text x="440" y="94" font-size="10" fill="#334155"><tspan font-weight="700" fill="#5b3cc4">Retained(X)</tspan> = X + A + B + C:</text>
+      <text x="440" y="108" font-size="10" fill="#334155">what would be freed if X disappeared.</text>
+    </svg>
+    <figcaption><b>Figure 1.5</b> Shallow vs. retained size, and the dominator relationship.</figcaption>
+  </figure>
+  <table>
+    <thead><tr><th style="width:22%">Concept</th><th>Technically</th><th style="width:33%">Like I'm five</th></tr></thead>
+    <tbody>
+      <tr><td>Shallow size</td><td>Bytes occupied by the object itself (header and fields)</td><td>The weight of the empty box</td></tr>
+      <tr><td>Retained size</td><td>Bytes that would become unreachable if this object were removed</td><td>The box, plus everything that only hangs from it</td></tr>
+      <tr><td>Dominator</td><td>X dominates Y if every root-to-Y path goes through X. The <b>dominator tree</b> arranges the heap by this relation</td><td>The one string everything else hangs from. Cut it and they all fall</td></tr>
+      <tr><td>Accumulation point</td><td>The object where retained size concentrates, usually a collection with tiny shallow and huge retained size</td><td>The basket all the receipts are in</td></tr>
+      <tr><td>Path to GC roots</td><td>The reference chain from an object back to the root that keeps it alive</td><td>Following the string back up to the hook on the wall</td></tr>
+      <tr><td>Histogram</td><td>Instance count and size per class</td><td>Counting boxes by type</td></tr>
+      <tr><td>Heap diff</td><td>Per-class change between two dumps</td><td>Comparing two photos taken a week apart</td></tr>
+    </tbody>
+  </table>
+  <div class="box tech"><div class="label">Technically · the tool</div>
+    <p><b>Eclipse Memory Analyzer (MAT)</b> parses a dump, builds indexes and the dominator tree, and offers
+      <i>Leak Suspects</i>, <i>Dominator Tree</i>, <i>Histogram</i>, <i>Path to GC Roots</i>, dump comparison and OQL
+      (an SQL-like query language over objects). To read OpenJ9 PHD or core files, MAT needs the <b>IBM DTFJ</b>
+      plug-in (Diagnostic Tool Framework for Java).</p></div>
+</section>
+
+<!-- ================================================================ 1.10 -->
+<section id="f-platform">
+  <h2>1.10 Quarkus, Kubernetes and OpenShift building blocks</h2>
+  <table>
+    <thead><tr><th style="width:20%">Building block</th><th>What it is</th><th style="width:30%">Role in LeakLab</th></tr></thead>
+    <tbody>
+      <tr><td>Quarkus</td><td>A Java framework designed for containers: build-time wiring, fast start-up, small footprint</td><td>Hosts REST endpoints, scheduler, health and metrics</td></tr>
+      <tr><td>CDI bean (<code>@ApplicationScoped</code>)</td><td>A managed singleton-like component, injected where needed</td><td><code>LoadEngine</code>, <code>MemoryProbe</code>, <code>DumpService</code>…</td></tr>
+      <tr><td>Quarkus REST + SSE</td><td>HTTP endpoints; Server-Sent Events stream JSON to the browser over one long-lived connection</td><td>Control API and the 1 Hz telemetry feed</td></tr>
+      <tr><td>SmallRye Health</td><td><code>/q/health/live</code>, <code>/ready</code>, <code>/started</code></td><td>Targets of the Kubernetes probes</td></tr>
+      <tr><td>Micrometer + Prometheus</td><td>Metrics library and exposition at <code>/q/metrics</code></td><td>JVM pool, GC and LeakLab gauges</td></tr>
+      <tr><td>Pod / container</td><td>The unit Kubernetes schedules; one or more containers sharing network and volumes</td><td>One LeakLab JVM per pod</td></tr>
+      <tr><td>Deployment</td><td>Declarative "keep N pods of this template running"</td><td>Restarts the pod after an OOMKill</td></tr>
+      <tr><td><code>resources.requests/limits</code></td><td>Scheduling reservation / hard cgroup cap</td><td><code>limits.memory</code> becomes <code>memory.max</code></td></tr>
+      <tr><td>Probes</td><td>startup, readiness (receive traffic?) and liveness (restart?)</td><td>Must tolerate GC and dump pauses</td></tr>
+      <tr><td>PersistentVolumeClaim</td><td>Durable storage that outlives a container</td><td><code>/dumps</code> survives the kill</td></tr>
+      <tr><td>Service / Route</td><td>Stable in-cluster address / OpenShift's external HTTP(S) entry</td><td>Reaching the UI</td></tr>
+      <tr><td>BuildConfig + ImageStream</td><td>OpenShift-native image build (buildah, in the cluster) / image tag tracking and deploy trigger</td><td>Builds the Containerfile from your working copy</td></tr>
+      <tr><td>SCC <code>restricted-v2</code></td><td>OpenShift's default pod security: random non-root UID, group 0, no privilege escalation</td><td>Why the image is group-0 writable</td></tr>
+    </tbody>
+  </table>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>Kubernetes is the building manager's office. A <b>Deployment</b> is a standing order: "always have one tenant
+      living in a flat like this." The <b>limit</b> is the flat size written into the lease. If the landlord evicts
+      the tenant, the office immediately moves a fresh, identical tenant in. That hides the problem unless someone
+      reads the eviction notices. A <b>PVC</b> is a storage locker in the basement that stays even when tenants
+      change, which is where the diaries and photos go.</p></div>
+</section>

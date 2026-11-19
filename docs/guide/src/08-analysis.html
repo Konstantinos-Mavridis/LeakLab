@@ -1,0 +1,285 @@
+<section class="part" id="analysis">
+  <div class="num">E</div>
+  <div class="kicker">Part E · the analysis stage</div>
+  <h1>Tools in action: from evidence to the line of code</h1>
+  <div class="bar"></div>
+  <p class="lead">The scenarios produced evidence. This part analyses it with the real tools: Eclipse Memory
+    Analyzer, IBM DTFJ, the verbose GC log and javacores. Each tool is run on the lab's own dumps, and each step
+    is explained technically and "like I'm five". Every output on these pages was captured, not invented.</p>
+  <ul class="inpart">
+    <li>E0 The workbench</li><li>E1 Inventory</li><li>E2 GC trend</li><li>E3 Leak Suspects</li>
+    <li>E4 Histogram</li><li>E5 Histogram delta</li><li>E6 Dominator tree</li><li>E7 Immediate dominators</li>
+    <li>E8 OQL</li><li>E9 Path to GC roots</li><li>E10 Native delta</li><li>E11 When the tool points the wrong way</li>
+  </ul>
+</section>
+
+<section>
+  <div class="step" id="e0"><div class="step-head"><span class="step-no">E0</span><h3>The workbench: a separate analysis stage</h3><span class="when">analysis/Containerfile</span></div>
+    <figure>
+      <svg viewBox="0 0 700 170" xmlns="http://www.w3.org/2000/svg">
+        <defs><marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#475569"/></marker></defs>
+        <rect x="6" y="20" width="200" height="130" rx="10" fill="#fff1f3" stroke="#e11d48" stroke-dasharray="6 4"/>
+        <text x="20" y="40" font-size="10" font-weight="700" fill="#be123c">RUNNING SERVICE</text>
+        <rect x="20" y="52" width="172" height="40" rx="6" fill="#eff6ff" stroke="#0369a1"/><text x="106" y="70" font-size="10" text-anchor="middle" font-weight="700">LeakLab JVM (OpenJ9)</text><text x="106" y="84" font-size="8.5" text-anchor="middle" fill="#64748b">dump agents · guardian</text>
+        <rect x="20" y="102" width="172" height="36" rx="6" fill="#334155"/><text x="106" y="124" font-size="10" text-anchor="middle" fill="#fff" font-weight="700">/dumps (volume / PVC)</text>
+        <path d="M106 92 L106 100" stroke="#475569" stroke-width="1.4" marker-end="url(#ad)"/>
+        <path d="M192 120 L268 120" stroke="#475569" stroke-width="1.6" marker-end="url(#ad)"/>
+        <text x="230" y="112" font-size="8.5" text-anchor="middle" fill="#475569">read-only</text>
+        <rect x="272" y="20" width="290" height="130" rx="10" fill="#f3f0fe" stroke="#5b3cc4"/>
+        <text x="286" y="40" font-size="10" font-weight="700" fill="#5b3cc4">ANALYZER WORKBENCH · 4 GiB</text>
+        <g font-size="9">
+          <rect x="286" y="50" width="126" height="28" rx="5" fill="#fff" stroke="#5b3cc4"/><text x="349" y="68" text-anchor="middle" font-weight="700">Semeru 25 JDK</text>
+          <rect x="422" y="50" width="126" height="28" rx="5" fill="#fff" stroke="#5b3cc4"/><text x="485" y="68" text-anchor="middle" font-weight="700">Eclipse MAT 1.17</text>
+          <rect x="286" y="84" width="126" height="28" rx="5" fill="#fff" stroke="#5b3cc4"/><text x="349" y="102" text-anchor="middle" font-weight="700">IBM DTFJ (PHD/core)</text>
+          <rect x="422" y="84" width="126" height="28" rx="5" fill="#fff" stroke="#5b3cc4"/><text x="485" y="102" text-anchor="middle" font-weight="700">gc-trend · native-diff</text>
+          <rect x="286" y="118" width="262" height="24" rx="5" fill="#5b3cc4"/><text x="417" y="134" text-anchor="middle" font-weight="700" fill="#fff">analyze.sh: 10 steps</text>
+        </g>
+        <path d="M562 85 L604 85" stroke="#475569" stroke-width="1.6" marker-end="url(#ad)"/>
+        <rect x="606" y="40" width="88" height="96" rx="8" fill="#ecf8f2" stroke="#0f7a55"/>
+        <text x="650" y="66" font-size="10" text-anchor="middle" font-weight="700" fill="#0f7a55">report</text>
+        <text x="650" y="82" font-size="8.5" text-anchor="middle">01 … 10</text><text x="650" y="96" font-size="8.5" text-anchor="middle">SUMMARY.md</text><text x="650" y="110" font-size="8.5" text-anchor="middle">MAT HTML</text>
+      </svg>
+      <figcaption><b>Figure E.1</b> Evidence flows one way, read-only, from the service to a dedicated workbench.</figcaption>
+    </figure>
+    <div class="box tech"><div class="label">Technically</div>
+      <p>A separate image, <code>leaklab-analyzer</code>, packages an IBM Semeru 25 <b>JDK</b> (with <code>jdmpview</code>,
+        <code>jcmd</code> and OpenJ9's DTFJ modules), <b>Eclipse MAT 1.17.0</b> in headless batch mode
+        (<code>ParseHeapDump.sh</code>), and the <b>IBM DTFJ</b> feature, installed with Eclipse's p2 director so MAT
+        can read OpenJ9 PHD and core files. The evidence folder is mounted <b>read-only</b>. Dumps are copied to a
+        scratch area because MAT writes index files next to the dump it parses.</p>
+<pre>docker compose --profile analysis run --rm \
+  -e TARGET=heapdump.sized.20261017.104316.1.phd \
+  -e BASELINE=heapdump.sized.20261017.104116.1.phd \
+  analyzer /dumps/semeru-25/sized</pre></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>You don't study the photo album in the apartment
+      that's on fire. The photos go to a detective's lab across the street. The lab has its own magnifying glasses
+      (MAT), a special lens for OpenJ9's photo format (DTFJ), and plenty of desk space. The photos are only
+      looked at, never changed.</p></div>
+    <div class="box why"><div class="label">Why a separate stage</div>
+      <ul>
+        <li><b>Memory</b>: parsing needs about 1–1.5× the dump's live heap. Doing it inside a struggling pod would
+          trigger the next OOMKill.</li>
+        <li><b>Data protection</b>: dumps hold production data. The workbench is the one controlled place where
+          they're opened.</li>
+        <li><b>Slim runtime</b>: analysis tools never ship in the production image.</li>
+        <li><b>Repeatability</b>: the same evidence and the same image give the same report every time, ready to
+          attach to an incident.</li>
+      </ul></div>
+    <div class="box lab"><div class="label">In the lab · the evidence analysed below</div>
+      <p><b>D1</b> = heap dump right after "Release" (live set ≈ 57 MiB). Then 120 s of
+        <code>HEAP · 40 req/s · 256 KiB · 20 % retained</code>. <b>D2</b> = second heap dump. The app's own counters
+        at D2: <b>971</b> retained <code>SessionContext</code>s holding <b>254,541,824</b> bytes. A correct analysis
+        should land on exactly these numbers.</p></div>
+  </div>
+
+  <div class="step" id="e1"><div class="step-head"><span class="step-no">E1</span><h3>Inventory: what evidence do we have?</h3><span class="when">01-inventory.txt</span></div>
+    <div class="box tech"><div class="label">Technically</div><p>List the heap dumps, javacores and GC logs, newest
+      first, and pick the pair to compare. Both dumps must come from the <b>same JVM</b>, because object counts
+      from two different processes aren't comparable. Javacores are paired by their <code>1CISTARTTIME</code>
+      (JVM start time) for the same reason.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Before investigating, the detective lays every photo
+      and diary on the table and checks they're from the same apartment and the same week.</p></div>
+  </div>
+
+  <div class="step" id="e2"><div class="step-head"><span class="step-no">E2</span><h3>GC trend: is the live set growing?</h3><span class="when">gc-trend.sh · GUI: IBM GCMV</span></div>
+    <div class="box lab"><div class="label">Real output (sized, one log covering a whole container run)</div>
+<pre>global GC end (UTC)       used after GC      heap size
+2026-10-17T10:03:26.846         30.6 MiB        46.8 MiB   <span class="c">← aggressive leak starts</span>
+2026-10-17T10:03:44.865        277.2 MiB       397.5 MiB
+2026-10-17T10:03:53.779        459.8 MiB       614.4 MiB   <span class="c">← heap reaches -Xmx</span>
+2026-10-17T10:04:01.666        614.2 MiB       614.4 MiB   <span class="h">← pinned: each GC frees nothing</span>
+2026-10-17T10:04:24.186         37.7 MiB       614.4 MiB   <span class="c">← "Release retained"</span>
+2026-10-17T10:41:16.236         56.9 MiB       457.8 MiB   <span class="c">← D1</span>
+2026-10-17T10:43:16.895        303.3 MiB       456.5 MiB   <span class="c">← D2</span>
+max heap (-Xmx): 614.4 MiB; live set peaked at 100% of it
+<span class="y">VERDICT: heap exhausted — 22 global GCs recovered almost nothing (GC death spiral before OutOfMemoryError)</span></pre></div>
+    <div class="box tech"><div class="label">Technically</div><p>The script reads OpenJ9's verbose GC XML, takes the
+      <code>&lt;mem-info&gt;</code> after every <code>gc-end type="global"</code>, and reports used = total − free.
+      That is the <b>live set</b>. It also reads <code>maxHeapSize</code> from the log header to judge scale. The
+      verdict distinguishes <i>rising floor</i> (leak), <i>heap exhausted</i> (many global GCs freeing &lt; 5 %: the
+      death spiral just before OOM), <i>slight rise</i> (inconclusive) and <i>flat</i>.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Read only one column of the cleaner's diary: "how
+      full was the flat right after a full clean?" It went up, then hit the ceiling, and for 22 cleans in a row the
+      cleaner couldn't throw anything away. Then someone emptied the basket, and it started filling again.</p></div>
+    <div class="box why"><div class="label">Purpose</div><p>It confirms the <b>shape</b> before you dig. It's also cheap:
+      the log is always on and needs no pause, so it is the first thing to read in any incident.</p></div>
+  </div>
+
+  <div class="step" id="e3"><div class="step-head"><span class="step-no">E3</span><h3>Leak Suspects: MAT's first hypothesis</h3><span class="when">MAT&gt; org.eclipse.mat.api:suspects</span></div>
+    <div class="box lab"><div class="label">Real output (D2)</div>
+<pre><span class="h">The class io.leaklab.leak.CustomerSessionCache, loaded by &lt;system class loader&gt;, occupies 254,830,240 (81.44%) bytes.</span>
+The top consumers of its minimum retained heap are byte[] (2,919 instances totaling 254,619,624),
+java.lang.Object[] (971 instances totaling 54,376), and java.lang.String (1,948 instances totaling 46,752).
+The memory is accumulated in one instance of java.util.concurrent.ConcurrentHashMap$Node[] ... 254,829,864 (81.44%) bytes.
+Shortest Paths To the Accumulation Point
+  ConcurrentHashMap$Node[2048] @ 0xd9b7e9f8                    8,200   254,829,864
+  \ ConcurrentHashMap @ 0xd9f15260                                64   254,829,928
+  .\ class io.leaklab.leak.CustomerSessionCache   System Class   224   254,830,240</pre></div>
+    <div class="box tech"><div class="label">Technically</div><p>The first call parses the dump: it reads the PHD
+      through DTFJ, purges unreachable objects, builds the object graph, computes the <b>dominator tree</b> and
+      retained sizes, and writes about 12 index files. The report then flags objects or classes whose retained size is
+      a disproportionate share of the heap. It names the <b>accumulation point</b> (where the memory piles up) and the
+      shortest path to it.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The detective glances at all the photos and says:
+      "My hunch: most of the stuff hangs off one hook, the CustomerSessionCache. And it's all piled into one
+      basket." It's a hunch, not proof yet.</p></div>
+  </div>
+
+  <div class="step" id="e4"><div class="step-head"><span class="step-no">E4</span><h3>Histogram: what is the heap made of?</h3><span class="when">MAT&gt; histogram</span></div>
+<pre>Class Name                                   | Objects | Shallow Heap
+byte[]                                       |  34,703 |  306,795,264
+java.lang.Class                              |   7,730 |    1,731,520
+java.lang.String                             |  32,677 |      784,248</pre>
+    <div class="box tech"><div class="label">Technically</div><p>Instances and shallow bytes per class. Arrays of
+      primitives nearly always top this list because they hold the actual data. The histogram shows <i>where the
+      bytes are</i>, never <i>why they are kept</i>.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Counting boxes by type: "there's a mountain of paper."
+      True, but paper isn't the culprit. You still need to know who keeps it.</p></div>
+  </div>
+
+  <div class="step" id="e5"><div class="step-head"><span class="step-no">E5</span><h3>Histogram delta: what grew?</h3><span class="when">MAT&gt; org.eclipse.mat.api:compare -snapshot2=D1</span></div>
+    <div class="box lab"><div class="label">Real output (D2 − D1)</div>
+<pre>Class (target − baseline)                      Δ objects   Δ shallow bytes
+byte[]                                           +2961        +254665512
+java.lang.Object[]                                +975            +54552
+java.lang.String                                 +1988            +47712
+<span class="h">io.leaklab.leak.SessionContext                    +971            +31072</span>
+java.util.concurrent.ConcurrentHashMap$Node       +980            +23520
+java.time.Instant                                 +971            +23304
+java.util.ImmutableCollections$MapN               +971            +23304</pre></div>
+    <div class="box tech"><div class="label">Technically</div><p>MAT computes both histograms and subtracts them.
+      Look at the <b>proportions</b>, not just the size. 971 contexts, 971 timestamps (<code>createdAt</code>), 971
+      attribute maps (<code>Map.of</code>), ~971 map nodes, ≈ 2 × 971 strings (request and customer IDs) and
+      ≈ 3 × 971 byte arrays (payload plus the strings' backing arrays). Everything grows in lock-step with one
+      entity, and 971 is exactly the number of retained requests the app reported. The first non-JDK class that
+      grew, <code>SessionContext</code>, becomes the suspect class for the next steps.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Compare two photos taken two minutes apart. 971 new
+      folders appeared, and each brought exactly one clock, one label set and one bundle of paper. Whatever
+      makes folders is the problem.</p></div>
+    <div class="box why"><div class="label">Purpose</div><p>Growth is the definition of a leak, and this is the most
+      direct measurement of it. It also filters out large but stable things such as caches with bounds, pools and the
+      parachute, which don't appear in the delta at all.</p></div>
+  </div>
+
+  <div class="step" id="e6"><div class="step-head"><span class="step-no">E6</span><h3>Dominator tree: which objects keep the most alive?</h3><span class="when">MAT&gt; dominator_tree</span></div>
+<pre>Class Name                                               | Shallow Heap | Retained Heap | Percentage
+<span class="h">class io.leaklab.leak.CustomerSessionCache @ 0xd9e49a70  |          224 |   254,830,240 |     81.44%</span>
+io.leaklab.load.LoadEngine @ 0xd9cf00f8                  |           64 |    25,166,048 |      8.04%
+io.leaklab.load.LoadEngine_ClientProxy @ 0xd9e7caf0      |           72 |    25,165,984 |      8.04%</pre>
+    <div class="box tech"><div class="label">Technically</div><p>Top-level entries of the dominator tree, ranked by
+      retained size. The signature of an accumulation point is a <b>tiny shallow size with a huge retained size</b>:
+      224 bytes keeping 254 MB alive. The second entry, <code>LoadEngine</code> at 24 MiB, is the lab's
+      intentional OOM parachute, a single <code>byte[24 MiB]</code>. It is large but <b>expected</b>, and it did
+      not grow (step E5).</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Find the strings that hold up the most weight. One
+      thin string holds up 81 % of everything. Another holds a big emergency sandbag that's supposed to be there.
+      Knowing which heavy things are <i>meant</i> to be there is half of the skill.</p></div>
+  </div>
+
+  <div class="step" id="e7"><div class="step-head"><span class="step-no">E7</span><h3>Immediate dominators of <code>byte[]</code>: who owns the bytes?</h3><span class="when">MAT&gt; immediate_dominators byte[]</span></div>
+<pre>Class Name                       | Objects | Dominated Objects | Shallow Heap | Dom. Shallow Heap
+<span class="h">io.leaklab.leak.SessionContext   |     971 |             1,942 |       31,072 |       254,572,888</span>
+io.leaklab.load.LoadEngine       |       1 |                 2 |           64 |        25,165,880
+&lt;ROOT&gt;                           |       1 |            25,848 |            0 |         1,385,312</pre>
+    <div class="box tech"><div class="label">Technically</div><p>For every <code>byte[]</code>, MAT finds its nearest
+      dominator and groups the results by the dominator's class. 971 <code>SessionContext</code>s exclusively own
+      254,572,888 bytes. The app's own counter said 254,541,824 bytes of payload; the extra ~31 KB is the ID strings.
+      Tool and ground truth agree.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>For each pile of paper, ask "whose desk is this
+      on?". Almost all of it sits on 971 identical desks.</p></div>
+  </div>
+
+  <div class="step" id="e8"><div class="step-head"><span class="step-no">E8</span><h3>OQL: what do the leaking objects look like?</h3><span class="when">MAT&gt; oql "SELECT …"</span></div>
+<pre>MAT&gt; oql "SELECT s, s.@usedHeapSize, s.@retainedHeapSize FROM io.leaklab.leak.SessionContext s"
+s                                             | s.@usedHeapSize | s.@retainedHeapSize
+io.leaklab.leak.SessionContext [id=0xd9d81940]|              32 |             262,336
+io.leaklab.leak.SessionContext [id=0xd9d81978]|              32 |             262,336</pre>
+    <div class="box tech"><div class="label">Technically</div><p>OQL is MAT's SQL over objects, with built-in attributes
+      such as <code>@retainedHeapSize</code>, <code>@usedHeapSize</code> and <code>@GCRootInfo</code>. Each context is
+      32 bytes itself and retains 262,336 bytes: the 256 KiB payload plus its strings, map and timestamp. Uniform
+      sizes point to <b>one code path</b>. The object ID feeds the next step.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Ask the photo archive a precise question: "show me
+      every folder and how much it drags along." They're all the same size, so one machine made all of them.</p></div>
+  </div>
+
+  <div class="step" id="e9"><div class="step-head"><span class="step-no">E9</span><h3>Path to GC roots: why can't the GC free it?</h3><span class="when">MAT&gt; path2gc 0xd9d81940 -excludes …</span></div>
+    <div class="box lab"><div class="label">Real output: the proof</div>
+<pre>                                                                 shallow      retained
+io.leaklab.leak.SessionContext @ 0xd9d81940                           32       262,336
+|-  java.util.concurrent.ConcurrentHashMap$Node @ 0xd9d7c3a0          24       524,864
+|  |- [44] java.util.concurrent.ConcurrentHashMap$Node[2048]       8,200   254,829,864
+|  |  |-  java.util.concurrent.ConcurrentHashMap @ 0xd9f15260        64   254,829,928
+<span class="h">|  |  |  |-  class io.leaklab.leak.CustomerSessionCache  System Class  224   254,830,240</span></pre></div>
+    <div class="box tech"><div class="label">Technically</div><p>The reference chain from one instance back to a GC root.
+      Weak, soft and finalizer references are excluded because they don't keep objects alive. Read it bottom-up:
+      a <b>System Class</b> root (a loaded class, so one of its <code>static</code> fields) → a
+      <code>ConcurrentHashMap</code> → bucket slot <code>[44]</code> → a node → the context. This is the <b>proof</b>.
+      In code, <code>CustomerSessionCache</code>'s static map is <code>SESSIONS</code>, written by
+      <code>remember()</code>, which is called from <code>CheckoutService.process(…, retryAware=true)</code>.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Follow the string from one folder: to a tag, to a rack,
+      to a basket, to the hook on the wall. Now you know <i>exactly</i> which hook to remove, and the cleaner will do
+      the rest.</p></div>
+    <div class="box arch"><div class="label">Architect's note</div><p>A finding is ready to act on when you can state
+      it like this: <i>"static <code>CustomerSessionCache.SESSIONS</code> retains 971 <code>SessionContext</code>s
+      (254 MB, 81 % of the heap), growing one per retry-aware request, because entries are keyed by a unique
+      <code>requestId</code> and never evicted."</i> That names the root, the size, the growth law and the mechanism.
+      It is precise enough to fix and to verify.</p></div>
+  </div>
+
+  <div class="step" id="e10"><div class="step-head"><span class="step-no">E10</span><h3>Native delta: anything growing outside the heap?</h3><span class="when">nativemem-diff.sh</span></div>
+<pre>sized:  VERDICT: no significant native growth (largest Δ 1.8 MiB)</pre>
+    <div class="box tech"><div class="label">Technically</div><p>Two javacores from the same JVM are parsed into
+      NATIVEMEMINFO category paths and subtracted. For <i>sized</i> nothing grows outside the heap, so the
+      investigation is complete: a pure heap leak.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Last check: compare two floor reports of the
+      apartment. The living room hasn't changed, so all the trouble was in the storage room.</p></div>
+  </div>
+
+  <div class="step" id="e11"><div class="step-head"><span class="step-no">E11</span><h3>When the tool points the wrong way: the native scenario</h3><span class="when">BASELINE=- analyzer /dumps/semeru-25/native</span></div>
+    <div class="box lab"><div class="label">Real output (guardian dump and javacores from Scenario D)</div>
+<pre>Heap context — heap in the dump ≈ 56 MiB of a 384 MiB maximum (15%).
+GC trend      VERDICT: slight rise (+13.3 MiB, 3% of max heap) — not conclusive
+<span class="y">MAT suspect   One instance of io.leaklab.load.LoadEngine_ClientProxy occupies 25,165,984 (42.80%) bytes ...
+              The memory is accumulated in one instance of byte[]</span>
+NATIVEMEMINFO +625.6 MiB  +969 allocs  JRE > Class Libraries > VM Class Libraries > sun.misc.Unsafe > Other
+<span class="h">VERDICT: native growth of 625.6 MiB in "… > sun.misc.Unsafe > Other"</span></pre></div>
+    <div class="box tech"><div class="label">Technically</div><p>MAT's Leak Suspects report <b>always names something</b>.
+      Here it names the 24 MiB parachute at "42.80 %". But that is 42.8 % of a <b>56 MiB</b> heap, which is 15 % of
+      <code>-Xmx</code>, with a flat live set. The real leak is in step E10: 969 native allocations totalling 625.6 MiB,
+      in the category where FFM <code>Arena</code> and <code>Unsafe</code> allocations land. That's why the summary
+      reports <b>heap context</b> first: percentages in MAT are relative to the heap in the dump, not to the process
+      or the container.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The detective only looked at photos of the storage
+      room, and pointed at the biggest thing there, the emergency sandbag. But the storage room was nearly empty. The
+      living-room report showed 969 new crates. Always check how full the room is before blaming what's in it.</p></div>
+    <div class="box warn"><div class="label">Pitfall</div><p>"Fixing" the top Leak Suspect without checking heap context,
+      growth (E5) and native memory (E10) is the most common way heap analysis goes wrong. Leak Suspects is a
+      <b>hypothesis generator</b>, not a verdict.</p></div>
+  </div>
+
+  <h3>Tool map: GUI and batch equivalents</h3>
+  <table>
+    <thead><tr><th style="width:22%">Question</th><th style="width:28%">MAT GUI</th><th style="width:28%">Batch (analysis stage)</th><th>Elsewhere</th></tr></thead>
+    <tbody>
+      <tr><td>Growing at all?</td><td>–</td><td><code>gc-trend.sh</code></td><td>IBM GCMV, Prometheus</td></tr>
+      <tr><td>First hypothesis</td><td>Leak Suspects report</td><td><code>mat.sh suspects</code></td><td>IBM HeapAnalyzer</td></tr>
+      <tr><td>Composition</td><td>Histogram</td><td><code>mat.sh query … histogram</code></td><td><code>jcmd GC.class_histogram</code></td></tr>
+      <tr><td>Growth</td><td>Compare to another Heap Dump</td><td><code>mat.sh compare</code></td><td>two histograms + diff</td></tr>
+      <tr><td>Accumulation point</td><td>Dominator Tree</td><td><code>… dominator_tree</code></td><td></td></tr>
+      <tr><td>Owners of bytes</td><td>Immediate Dominators</td><td><code>… immediate_dominators byte[]</code></td><td></td></tr>
+      <tr><td>Instance detail</td><td>OQL console</td><td><code>… oql "SELECT …"</code></td><td><code>jdmpview</code> on a core</td></tr>
+      <tr><td>Proof</td><td>Path To GC Roots</td><td><code>… path2gc 0x… -excludes …</code></td><td></td></tr>
+      <tr><td>Off-heap</td><td>–</td><td><code>nativemem-diff.sh</code></td><td>pmap, jemalloc; HotSpot NMT</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box arch nobreak"><div class="label">Part E · key takeaways</div>
+    <ul>
+      <li>Analyse dumps in a separate, sized, controlled workbench. Never in the production pod.</li>
+      <li>Follow the order: trend → hypothesis → composition → <b>growth</b> → dominators → owners → instances →
+        <b>proof</b> → off-heap. Each step answers one question.</li>
+      <li>Check the tools against ground truth when you can. Here, 971 objects and 254.5 MB matched the app's own counters.</li>
+      <li>Always read <b>heap context</b> before trusting a percentage. A "42 %" suspect can be a harmless sandbag.</li>
+      <li>Batch mode makes the analysis repeatable and attachable to incidents. The GUI is for exploring.</li>
+    </ul></div>
+</section>

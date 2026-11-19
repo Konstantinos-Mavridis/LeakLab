@@ -1,0 +1,34 @@
+# Scenario C · greedy — the percentage trap: an implicit overcommit. Only MaxRAMPercentage is set, at 95 %.
+# The heap fits (≈ 973 MiB of 1 GiB), but direct buffers are uncapped (default ≈ max heap, on top of the heap), so a
+# direct-buffer leak ends in an OOMKill, never an OutOfMemoryError. The guardian captures evidence at 90 % first.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+nameSuffix: -greedy
+labels:
+  - pairs:
+      leaklab.io/scenario: greedy
+    includeSelectors: true
+patches:
+  - target: { kind: Deployment, name: leaklab }
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: leaklab
+      spec:
+        template:
+          spec:
+            containers:
+              - name: leaklab
+                env:
+                  - name: LEAKLAB_SCENARIO
+                    value: greedy
+                  - name: JAVA_OPTS
+                    value: -XX:MaxRAMPercentage=95
+                  - name: LEAKLAB_LOAD_MODE
+                    value: DIRECT
+                resources:
+                  requests: { cpu: 500m, memory: 1Gi }
+                  limits: { memory: 1Gi }

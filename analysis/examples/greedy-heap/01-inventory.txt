@@ -1,0 +1,8 @@
+Evidence in /dumps/greedy/run-heap  (newest first)
+
+Heap dumps (1):
+       2899958  2026-10-17T12:13:47  /dumps/greedy/run-heap/heapdump.greedy.20261017.121347.1.phd
+Javacores (1):
+       1108704  2026-10-17T12:13:47  /dumps/greedy/run-heap/javacore.greedy.20261017.121346.1.txt
+GC logs (1):
+       1011490  2026-10-17T12:13:56  /dumps/greedy/run-heap/verbosegc.20261017.121158.1.001.log

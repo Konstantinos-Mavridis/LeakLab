@@ -1,0 +1,15 @@
+# MAT> path2gc 0xc33f55f8 -excludes java.lang.ref.Reference:referent java.lang.ref.Finalizer:unfinalized
+
+Class Name                                                                       | Shallow Heap | Retained Heap
+----------------------------------------------------------------------------------------------------------------
+io.leaklab.leak.SessionContext @ 0xc33f55f8                                      |           32 |       524,480
+|-  java.util.concurrent.ConcurrentHashMap$Node @ 0xc33f5548                     |           24 |       524,576
+|  |- [348] java.util.concurrent.ConcurrentHashMap$Node[4096] @ 0xfefa3680       |       16,392 |   808,912,760
+|  |  |-  java.util.concurrent.ConcurrentHashMap @ 0xc6849ee0                    |           64 |   808,912,824
+|  |  |  |-  class io.leaklab.leak.CustomerSessionCache @ 0xc37f2e18 System Class|          224 |   808,913,136
+|  |  |  '- Total: 1 entry                                                       |              |              
+|  |  '- Total: 1 entry                                                          |              |              
+|  '- Total: 1 entry                                                             |              |              
+'- Total: 1 entry                                                                |              |              
+Total: 1 entry                                                                   |              |              
+----------------------------------------------------------------------------------------------------------------

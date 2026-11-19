@@ -1,0 +1,76 @@
+Description
+One instance of io.leaklab.load.LoadEngine_ClientProxy loaded by <system class loader> occupies 25,165,984 (42.80%) bytes. The top consumers of its minimum retained heap are byte[] (1 instance totaling 25,165,832), io.leaklab.load.LoadEngine_ClientProxy (1 instance totaling 72), and java.util.concurrent.atomic.AtomicLong (3 instances totaling 48). The memory is accumulated in one instance of byte[] , loaded by <system class loader> , which occupies 25,165,832 (42.80%) bytes. Keywords 
+io.leaklab.load.LoadEngine_ClientProxy
+byte[]
+Shortest Paths To the Accumulation Point 
+Class Name Shallow Heap Retained Heap 
+byte[25165824] @ 0xe9cda708 
+25,165,832 25,165,832 
+\ io.leaklab.load.LoadEngine_ClientProxy @ 0xe83bd330 
+72 25,165,984 
+.+ io.leaklab.load.LoadEngine_Bean @ 0xe8226738 
+32 48 
+.|+ [25] java.lang.Object[100] @ 0xe825ee08 
+408 408 
+.||\ java.util.ImmutableCollections$ListN @ 0xe825e0e0 
+16 424 
+.||.\ io.quarkus.arc.impl.ArcContainerImpl @ 0xe81d80c8 
+88 59,128 
+.||..+ class io.quarkus.arc.Arc @ 0xe81a1218 System Class 
+224 288 
+.||..+ java.util.HashMap$Node @ 0xe8264a80 »
+24 112 
+.||..+ io.quarkus.arc.runtime.BeanContainerImpl @ 0xe8264a70 »
+16 16 
+.||..\ Total: 3 entries
+.|+ io.quarkus.arc.impl.ContextInstanceHandleImpl @ 0xe8369e20 »
+32 64 
+.|\ Total: 2 entries
+.+ io.leaklab.api.TelemetryResource @ 0xe83bf130 »
+40 40 
+.\ Total: 2 entries
+Accumulated Objects in Dominator Tree 
+Class Name Shallow Heap Retained Heap Percentage 
+io.leaklab.load.LoadEngine_ClientProxy @ 0xe83bd330 
+72 25,165,984 42.80% 
+\ byte[25165824] @ 0xe9cda708 
+25,165,832 25,165,832 42.80% 
+Accumulated Objects by Class in Dominator Tree 
+Label Number of Objects Used Heap Size Retained Heap Size 
+All Accumulated Objects by Class 
+Class Name Objects Shallow Heap 
+byte[] 
+Only object 1 25,165,832 
+
+Description
+One instance of io.leaklab.load.LoadEngine loaded by <system class loader> occupies 25,165,976 (42.80%) bytes. The top consumers of its minimum retained heap are byte[] (1 instance totaling 25,165,832), io.leaklab.load.LoadEngine (1 instance totaling 64), and java.util.concurrent.atomic.AtomicLong (3 instances totaling 48). The memory is accumulated in one instance of byte[] , loaded by <system class loader> , which occupies 25,165,832 (42.80%) bytes. Keywords 
+io.leaklab.load.LoadEngine
+byte[]
+Shortest Paths To the Accumulation Point 
+Class Name Shallow Heap Retained Heap 
+byte[25165824] @ 0xe84bd2f0 
+25,165,832 25,165,832 
+\ io.leaklab.load.LoadEngine @ 0xe836a2e8 
+64 25,165,976 
+.+ io.leaklab.load.LoadEngine$$Lambda.0x00000000bd33b838 @ 0xe83befe8 
+16 16 
+.|\ java.lang.Thread$FieldHolder @ 0xe83be098 
+40 56 
+.|.\ java.lang.Thread @ 0xe83bd900 Unknown 
+120 368 
+.+ io.quarkus.arc.impl.ContextInstanceHandleImpl @ 0xe8369e20 »
+32 64 
+.\ Total: 2 entries
+Accumulated Objects in Dominator Tree 
+Class Name Shallow Heap Retained Heap Percentage 
+io.leaklab.load.LoadEngine @ 0xe836a2e8 
+64 25,165,976 42.80% 
+\ byte[25165824] @ 0xe84bd2f0 
+25,165,832 25,165,832 42.80% 
+Accumulated Objects by Class in Dominator Tree 
+Label Number of Objects Used Heap Size Retained Heap Size 
+All Accumulated Objects by Class 
+Class Name Objects Shallow Heap 
+byte[] 
+Only object 1 25,165,832 
+

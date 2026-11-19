@@ -1,0 +1,43 @@
+# LeakLab analyzer — the offline forensics workbench.
+#
+#   IBM Semeru 25 JDK (OpenJ9: jdmpview, jcmd, DTFJ)  +  Eclipse Memory Analyzer (headless)  +  IBM DTFJ feature
+#   It reads the evidence of all twelve variants: OpenJ9 or HotSpot, Java 17, 21 or 25.
+#
+# Heap dumps are analysed HERE, never inside the production pod: parsing a dump needs roughly
+# 1–1.5x the dump's live heap in RAM and minutes of CPU — exactly what a sick pod does not have.
+#
+#   docker build -t leaklab-analyzer:1.0.0 analysis
+#   docker compose --profile analysis run --rm analyzer            # analyse ./dumps/redhat-21/sized (the default JVM)
+ARG BASE_IMAGE=ibm-semeru-runtimes:open-25-jdk-noble
+FROM ${BASE_IMAGE}
+
+ARG MAT_VERSION=1.17.0
+ARG MAT_BUILD=20260601
+ARG DTFJ_SITE=https://public.dhe.ibm.com/ibmdl/export/pub/software/websphere/runtimes/tools/dtfj/
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl unzip ca-certificates libgtk-3-0 \
+ && rm -rf /var/lib/apt/lists/*
+
+# Eclipse Memory Analyzer, standalone RCP build (runs headless via ParseHeapDump.sh)
+RUN curl -fsSL -o /tmp/mat.zip \
+      "https://download.eclipse.org/mat/${MAT_VERSION}/rcp/MemoryAnalyzer-${MAT_VERSION}.${MAT_BUILD}-linux.gtk.x86_64.zip" \
+ && unzip -q /tmp/mat.zip -d /opt \
+ && rm /tmp/mat.zip \
+ && sed -i 's/^-Xmx.*/-Xmx3g/' /opt/mat/MemoryAnalyzer.ini
+
+# IBM DTFJ: lets MAT read OpenJ9 Portable Heap Dumps (.phd) and system cores (.dmp)
+RUN /opt/mat/MemoryAnalyzer -nosplash -consoleLog \
+      -application org.eclipse.equinox.p2.director \
+      -repository "${DTFJ_SITE}" \
+      -installIU com.ibm.dtfj.feature.feature.group \
+ && ls /opt/mat/plugins | grep -i dtfj
+
+COPY bin/ /opt/leaklab/bin/
+RUN chmod +x /opt/leaklab/bin/*
+
+ENV PATH="/opt/leaklab/bin:/opt/mat:${PATH}" \
+    MAT_HOME=/opt/mat
+WORKDIR /work
+ENTRYPOINT ["analyze.sh"]
+CMD ["/dumps"]

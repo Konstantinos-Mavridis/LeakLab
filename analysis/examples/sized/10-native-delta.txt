@@ -1,0 +1,20 @@
+NATIVEMEMINFO delta  javacore.20261017.100401.1.0003.txt  →  javacore.20261017.100407.1.0006.txt
+
+      Δ bytes    Δ allocs  category
+          +1.8 MiB      +1672  JRE
+          +1.0 MiB        +28  JRE > JIT
+          +1.0 MiB        +28  JRE > JIT > Other
+          +0.7 MiB      +1657  JRE > VM
+          +0.5 MiB         +5  JRE > VM > Threads
+          +0.5 MiB         +1  JRE > VM > Threads > Native Stack
+          +0.2 MiB      +1633  JRE > VM > Trace
+          +0.1 MiB         +3  JRE > Class Libraries > VM Class Libraries > sun.misc.Unsafe
+          +0.1 MiB        -13  JRE > Class Libraries > VM Class Libraries
+          +0.1 MiB        -13  JRE > Class Libraries
+          +0.1 MiB         +1  JRE > Class Libraries > VM Class Libraries > sun.misc.Unsafe > Direct Byte Buffers
+          -0.0 MiB         +0  JRE > VM > Port Library > Unused <32bit allocation regions
+          -0.0 MiB         +3  JRE > VM > Port Library
+          +0.0 MiB         +1  JRE > VM > Threads > Java Stack
+          +0.0 MiB         +9  JRE > VM > Memory Manager (GC)
+
+VERDICT: no significant native growth (largest Δ 1.8 MiB)

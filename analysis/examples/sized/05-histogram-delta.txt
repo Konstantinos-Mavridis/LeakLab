@@ -1,0 +1,16 @@
+Class (target − baseline)                               Δ objects Δ shallow bytes
+byte[]                                                         +2961       +254665512
+java.lang.Object[]                                              +975           +54552
+java.lang.String                                               +1988           +47712
+io.leaklab.leak.SessionContext                                  +971           +31072
+java.util.concurrent.ConcurrentHashMap$Node                     +980           +23520
+java.time.Instant                                               +971           +23304
+java.util.ImmutableCollections$MapN                             +971           +23304
+int[]                                                            +10            +5672
+java.lang.Class                                                   +9            +2016
+java.util.HashMap$Node                                           +65            +1560
+java.lang.Integer                                                +52             +832
+java.util.HashMap$Node[]                                          +1             +520
+long[]                                                            +2             +304
+io.micrometer.core.instrument.Meter$Id                            +8             +256
+io.micrometer.core.instrument.distribution.DistributionStatisticConfig           +4             +160

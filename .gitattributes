@@ -1,0 +1,13 @@
+# Line endings: LF in the repository and in every checkout. The shell scripts, compose and env files run inside
+# Linux containers (analysis/bin/*.sh is copied into the analyzer image), where a CRLF checkout breaks them.
+# Windows PowerShell 5.1 reads LF scripts (docs/guide/build.ps1) without trouble.
+* text=auto eol=lf
+
+# Binary files: never touch them.
+*.pdf  binary
+*.png  binary
+*.gif  binary
+*.jpg  binary
+*.ico  binary
+*.zip  binary
+*.jar  binary

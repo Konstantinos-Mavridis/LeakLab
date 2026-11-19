@@ -1,0 +1,144 @@
+<section class="chapter" id="glossary">
+  <div class="kicker">Appendix A</div>
+  <h1>Glossary</h1>
+  <p class="lead">Every term used in this guide, alphabetically, defined twice.</p>
+  <table class="glossary">
+    <thead><tr><th>Term</th><th>Technically</th><th>Like I'm five</th></tr></thead>
+    <tbody>
+      <tr><td>Accumulation point</td><td>The object where retained size concentrates, typically a collection</td><td>The basket everything is piled into</td></tr>
+      <tr><td>Allocation failure</td><td>An allocation that does not fit in the current free space, triggering a GC</td><td>"No room for this box. Cleaner, please!"</td></tr>
+      <tr><td>Arena (FFM)</td><td>Owner and lifetime scope for native memory segments; closing it frees them</td><td>A rental agreement for crates. End it and the crates go back</td></tr>
+      <tr><td>BootstrapMethodError</td><td>Failure linking an <code>invokedynamic</code> call site. Sticky for that site</td><td>A skill the worker failed to learn once and now refuses for ever</td></tr>
+      <tr><td>BuildConfig / ImageStream</td><td>OpenShift in-cluster image build / image tag tracker with deploy triggers</td><td>The building's workshop / its delivery list</td></tr>
+      <tr><td>cgroup (v2)</td><td>Kernel control group: resource accounting and limits for a set of processes</td><td>The landlord's tape measure for one apartment</td></tr>
+      <tr><td>Committed</td><td>Memory the OS has agreed to back (not necessarily resident)</td><td>A parking spot you're allowed to use</td></tr>
+      <tr><td>Compaction</td><td>Moving live objects together to eliminate fragmentation</td><td>Pushing all the boxes to one side so there's one big free space</td></tr>
+      <tr><td>Container</td><td>A process with namespaces (isolation) and cgroups (limits)</td><td>An apartment in a shared building</td></tr>
+      <tr><td>Direct buffer</td><td><code>ByteBuffer.allocateDirect</code>: native memory capped by <code>MaxDirectMemorySize</code></td><td>Crates outside the storage room, with their own tally</td></tr>
+      <tr><td>Dominator / dominator tree</td><td>X dominates Y if every root path to Y passes through X</td><td>The single string everything else hangs from</td></tr>
+      <tr><td>DTFJ</td><td>IBM Diagnostic Tool Framework for Java. Lets MAT read PHD and OpenJ9 cores</td><td>The lens that lets the photo viewer read OpenJ9's album format</td></tr>
+      <tr><td>Dump agent (<code>-Xdump</code>)</td><td>OpenJ9 action bound to an event (OOM, SIGQUIT, allocation…)</td><td>A camera that goes off automatically on certain alarms</td></tr>
+      <tr><td>Exit code 137</td><td>128 + 9: the process was terminated by SIGKILL</td><td>The note on the door saying "forcibly removed"</td></tr>
+      <tr><td>FFM API</td><td>Foreign Function &amp; Memory API (<code>java.lang.foreign</code>), Java 22+</td><td>The official way to order crates outside the storage room</td></tr>
+      <tr><td>GC root</td><td>Starting point of reachability: statics, thread stacks, JNI references…</td><td>A hook on the wall</td></tr>
+      <tr><td>gencon</td><td>OpenJ9's default generational, concurrent GC policy</td><td>The cleaner's standard routine: door corner often, whole flat sometimes</td></tr>
+      <tr><td>Global GC</td><td>Whole-heap collection (mark, sweep, optionally compact)</td><td>Cleaning the entire apartment</td></tr>
+      <tr><td>Guardian</td><td>LeakLab's pressure watchdog: dumps at a working-set threshold</td><td>A smoke alarm with a camera</td></tr>
+      <tr><td>Heap dump</td><td>Snapshot of all objects and references (PHD / HPROF)</td><td>A photo album of every box and string</td></tr>
+      <tr><td>HotSpot</td><td>The JVM in most OpenJDK builds</td><td>The other translator, with a different notebook format</td></tr>
+      <tr><td>javacore</td><td>OpenJ9 text report: env, cgroup, native memory, GC, threads, locks</td><td>The written status report</td></tr>
+      <tr><td>JIT</td><td>Just-in-time compiler: bytecode to native code for hot methods</td><td>The translator memorising frequent sentences</td></tr>
+      <tr><td>Live set</td><td>Heap occupancy right after a global GC</td><td>How full the flat is right after a full clean</td></tr>
+      <tr><td>Liveness / readiness probe</td><td>Kubelet checks: restart if dead / route traffic if ready</td><td>"Are you alive?" / "Are you open for customers?"</td></tr>
+      <tr><td>MAT</td><td>Eclipse Memory Analyzer: heap-dump analysis tool</td><td>The photo-album viewer with a magnifying glass</td></tr>
+      <tr><td><code>MaxRAMPercentage</code></td><td>Heap ceiling as a percentage of the container limit</td><td>"Storage room: at most 60 % of the floor"</td></tr>
+      <tr><td><code>memory.events</code></td><td>cgroup counters: <code>max</code> (limit hits), <code>oom</code>, <code>oom_kill</code></td><td>The landlord's tally of warnings and evictions</td></tr>
+      <tr><td><code>memory.max</code></td><td>cgroup v2 hard memory limit</td><td>The apartment's floor area</td></tr>
+      <tr><td>NATIVEMEMINFO</td><td>javacore section: native memory by JVM component (reservations)</td><td>The report's room-by-room floor-plan bookings</td></tr>
+      <tr><td>Nursery / tenure</td><td>Young / old generation in gencon</td><td>The corner by the door / the back room</td></tr>
+      <tr><td>OOM killer</td><td>Kernel routine that SIGKILLs a process when memory can't be reclaimed</td><td>The landlord who evicts on the spot</td></tr>
+      <tr><td>OOMKilled</td><td>Runtime status for a container killed by the OOM killer</td><td>"Evicted for exceeding floor area"</td></tr>
+      <tr><td>OpenJ9 / Semeru</td><td>Eclipse JVM / IBM's OpenJDK distribution with OpenJ9</td><td>The translator / the publisher that ships them</td></tr>
+      <tr><td>OutOfMemoryError</td><td>JVM error when a JVM-enforced limit can't satisfy an allocation</td><td>The tenant saying "storage room full", calmly</td></tr>
+      <tr><td>Page cache</td><td>Kernel cache of file contents; reclaimable; charged to the cgroup</td><td>Newspapers on the table. Easy to throw away</td></tr>
+      <tr><td>Path to GC roots</td><td>Reference chain from an object to the root keeping it alive</td><td>Following the string up to the hook</td></tr>
+      <tr><td>PHD</td><td>Portable Heap Dump: OpenJ9 heap dump format (no primitive values)</td><td>A photo album showing boxes but not what's written inside</td></tr>
+      <tr><td>PID 1</td><td>The first process in the container's PID namespace</td><td>The person who answers the apartment's doorbell</td></tr>
+      <tr><td>PVC</td><td>PersistentVolumeClaim: durable storage for pods</td><td>A basement locker that survives evictions</td></tr>
+      <tr><td>QoS class</td><td>Guaranteed / Burstable / BestEffort, from requests and limits</td><td>Tenant priority when the building gets crowded</td></tr>
+      <tr><td>Reclaim</td><td>Kernel freeing reclaimable memory (cache, file pages, swap) under pressure</td><td>The landlord throwing out newspapers to make space</td></tr>
+      <tr><td>Reserved</td><td>Virtual address space mapped but not backed</td><td>Your name on a waiting list</td></tr>
+      <tr><td>Retained size</td><td>Bytes freed if the object were removed</td><td>The box plus everything only it holds up</td></tr>
+      <tr><td>RSS</td><td>Resident set size: physical memory pages in use</td><td>Cars actually parked</td></tr>
+      <tr><td>Scavenge</td><td>OpenJ9 minor GC: copy survivors out of the nursery</td><td>Emptying the bin by the door</td></tr>
+      <tr><td>SCC <code>restricted-v2</code></td><td>OpenShift default pod security: random UID, no privileges</td><td>The security desk's standard badge rules</td></tr>
+      <tr><td>Shallow size</td><td>Bytes of the object itself</td><td>The weight of the empty box</td></tr>
+      <tr><td>SIGKILL / SIGQUIT</td><td>Signal 9 (uncatchable kill) / signal 3 (OpenJ9: javacore, plus heap dump in LeakLab)</td><td>Eviction / ringing the "write a report" bell</td></tr>
+      <tr><td>SSE</td><td>Server-Sent Events: one-way streaming over HTTP</td><td>A radio station the dashboard listens to</td></tr>
+      <tr><td>Stop-the-world</td><td>All Java threads paused (GC phase or dump)</td><td>Everyone freezes like statues</td></tr>
+      <tr><td>TLH</td><td>Thread-local heap: per-thread allocation buffer in OpenJ9</td><td>Each worker's own shelf, so they don't queue</td></tr>
+      <tr><td>Verbose GC log</td><td>Per-collection record of occupancy and pauses</td><td>The cleaner's diary</td></tr>
+      <tr><td>Working set</td><td><code>memory.current − inactive_file</code>; kubelet's container memory figure</td><td>What the landlord's tape measure says, ignoring old newspapers</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="chapter" id="commands">
+  <div class="kicker">Appendix B</div>
+  <h1>Command cheat sheet</h1>
+  <h3>Run the lab</h3>
+<pre>docker compose --profile all up --build -d        <span class="c"># A–D, G on the default, Red Hat 21: :6180–6185</span>
+docker compose --env-file semeru-25.env \
+  --profile all up --build -d                     <span class="c"># A–D, G on Semeru 25 (this guide): :8080–8085</span>
+docker compose up -d --build sized                <span class="c"># one scenario: naming it is enough</span>
+docker compose --env-file oracle-25.env \
+  --profile all up -d                             <span class="c"># A–D, G on Oracle 25: :9080–9085</span>
+docker compose --profile all down                 <span class="c"># remove A–D, G (same --env-file)</span>
+docker compose --profile "*" down                 <span class="c"># remove everything</span></pre>
+  <h3>Your own sizing: the manual scenario (:x084), the plain <code>up</code></h3>
+<pre>docker compose up --build                         <span class="c"># Red Hat 21, 1 GiB, MaxRAMPercentage=75: :6184</span>
+docker compose --env-file temurin-21.env \
+  --env-file manual.env up -d                     <span class="c"># JVM from file 1, sizing from file 2</span>
+LEAKLAB_MANUAL_MEM=768m \
+LEAKLAB_MANUAL_JAVA_OPTS="-Xmx600m" \
+  docker compose --env-file oracle-21.env up -d   <span class="c"># the shell wins over both files</span>
+docker compose --env-file temurin-21.env down     <span class="c"># remove it</span>
+<span class="c"># more: LEAKLAB_MANUAL_CPUS · _LOAD_MODE · _GUARDIAN · _GUARDIAN_THRESHOLD · _KEEP_RUNNING_ON_OOM</span>
+<span class="c"># PowerShell: $env:LEAKLAB_MANUAL_MEM="768m"</span></pre>
+  <h3>Drive load without the UI</h3>
+<pre>curl -XPUT localhost:8080/api/load -H 'Content-Type: application/json' \
+  -d '{"running":true,"mode":"HEAP","ratePerSecond":100,"payloadKb":512,"retentionPercent":40}'
+<span class="c"># add "keepRunningOnOom":true to keep the engine on after an OOM (left out: unchanged; default false = pause)</span>
+curl -XPOST localhost:8080/api/load/burst -H 'Content-Type: application/json' -d '{"mode":"NATIVE","megabytes":64}'
+curl -XPOST localhost:8080/api/memory/release
+curl -XPOST localhost:8080/api/dumps/heap       <span class="c"># also: javacore | system</span></pre>
+  <h3>Inside a container</h3>
+<pre>cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current   <span class="c"># limit and usage (cgroup v2)</span>
+cat /sys/fs/cgroup/memory.events                               <span class="c"># max / oom / oom_kill counters</span>
+grep -E 'VmRSS|VmHWM' /proc/1/status                           <span class="c"># resident memory of the JVM</span>
+kill -QUIT 1                                                   <span class="c"># OpenJ9: javacore (+ heap dump with -Xdump:heap:events=user)</span>
+java -Xdump:what -version                                      <span class="c"># list active dump agents</span></pre>
+  <h3>Was it an OOMKill?</h3>
+<pre>docker inspect -f '{{.State.OOMKilled}} {{.State.ExitCode}}' leaklab-overcommit-semeru-25
+docker events --filter event=oom --since 1h --until "$(date -u +%FT%TZ)"
+scripts/oomkill-forensics.sh docker
+oc get pod -o jsonpath='{range .items[*]}{.metadata.name} {..lastState.terminated.reason} {..lastState.terminated.exitCode}{"\n"}{end}'
+oc logs &lt;pod&gt; --previous
+oc debug node/&lt;node&gt; -- chroot /host journalctl -k | grep -iE 'oom-kill|Killed process'
+scripts/oomkill-forensics.sh k8s leaklab</pre>
+  <h3>Collect evidence</h3>
+<pre>scripts/collect-evidence.sh docker leaklab-sized-semeru-25
+scripts/collect-evidence.sh k8s leaklab deploy/leaklab-native
+oc rsync &lt;pod&gt;:/dumps ./evidence</pre>
+  <h3>Analysis stage (Part E)</h3>
+<pre>docker compose --profile analysis build analyzer
+docker compose --profile analysis run --rm analyzer                          <span class="c"># ./dumps/redhat-21/sized, newest two dumps</span>
+docker compose --profile analysis run --rm -e BASELINE=- analyzer /dumps/semeru-25/native
+<span class="c"># inside the analyzer image, single tools:</span>
+mat.sh query  dump.phd out.txt dominator_tree
+mat.sh query  dump.phd out.txt 'path2gc 0xd9d81940 -excludes java.lang.ref.Reference:referent'
+mat.sh compare d2.phd d1.phd delta.csv
+gc-trend.sh verbosegc.*.log
+nativemem-diff.sh javacore.old.txt javacore.new.txt</pre>
+  <h3>OpenShift</h3>
+<pre>oc new-project leaklab
+oc apply -k deploy/openshift
+oc start-build leaklab --from-dir=app --follow
+oc get route -o custom-columns=NAME:.metadata.name,HOST:.spec.host</pre>
+  <h3>JVM flags referenced in this guide</h3>
+  <table>
+    <thead><tr><th style="width:42%">Flag</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td><code>-XX:MaxRAMPercentage=60</code></td><td>Heap ceiling = 60 % of the container limit</td></tr>
+      <tr><td><code>-Xmx1g</code></td><td>Fixed heap ceiling. Ignores the container limit</td></tr>
+      <tr><td><code>-XX:MaxDirectMemorySize=96m</code></td><td>Cap on direct buffers</td></tr>
+      <tr><td><code>-XX:+ExitOnOutOfMemoryError</code></td><td>Exit after the first OOM (after the dump agents run)</td></tr>
+      <tr><td><code>-Xdump:directory=/dumps</code></td><td>Where OpenJ9 writes all artefacts</td></tr>
+      <tr><td><code>-Xdump:heap:events=user</code></td><td>Heap dump on SIGQUIT</td></tr>
+      <tr><td><code>-Xdump:java+heap:events=throw,filter=java/lang/OutOfMemoryError,msg_filter=*direct*,range=1..1</code></td><td>Dumps for an OOM thrown by Java code (direct buffers), which the default <code>systhrow</code> agents ignore</td></tr>
+      <tr><td><code>-Xdump:heap:events=allocation,filter=#256m</code></td><td>Heap dump on any single allocation ≥ 256 MiB</td></tr>
+      <tr><td><code>-Xverbosegclog:&lt;file&gt;,5,20000</code></td><td>Rotating verbose GC log</td></tr>
+      <tr><td><code>--enable-native-access=ALL-UNNAMED</code></td><td>Silences Java 24+ restricted-native-access warnings</td></tr>
+    </tbody>
+  </table>
+</section>

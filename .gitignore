@@ -1,0 +1,49 @@
+# ---- build output
+target/
+docs/guide/build/
+# The field guide PDF: built by docs/guide/build.ps1 and published as a GitHub Release asset, never committed
+# (3 MB of binary on every rebuild would stay in the history forever).
+docs/LeakLab-Field-Guide.pdf
+
+# ---- evidence: dumps contain process memory (production data). Never commit them, wherever they end up.
+dumps/
+evidence/
+analysis/reports/
+*.phd
+*.hprof
+*.hprof.gz
+# HotSpot parallel heap-dump segments, left behind when a dump is interrupted
+*.hprof.p[0-9]*
+*.dmp
+*.trc
+javacore*.txt
+vmreport*.txt
+verbosegc*.log
+gc.*.log
+gc.*.log.[0-9]*
+# HotSpot crash and JIT-replay logs
+hs_err_pid*.log
+replay_pid*.log
+
+# ---- Eclipse MAT side files, written next to a dump opened on the host
+*.index
+*.threads
+*_Leak_Suspects.zip
+*_Query.zip
+*_Comparison.zip
+*_System_Overview.zip
+*_Top_Components.zip
+
+# ---- local configuration. .env, manual.env and the <jvm>-<version>.env files (semeru-25.env, …) ARE committed;
+#      keep a personal sizing in a file of your own, e.g. my-sizing.local.env
+*.local.env
+
+# ---- Claude Code's per-machine folder (settings, preview launch config): not part of the project
+.claude/
+
+# ---- IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

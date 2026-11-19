@@ -1,0 +1,14 @@
+# MAT> path2gc 0xe836a2e8 -excludes java.lang.ref.Reference:referent java.lang.ref.Finalizer:unfinalized
+
+Class Name                                                            | Shallow Heap | Retained Heap
+-----------------------------------------------------------------------------------------------------
+io.leaklab.load.LoadEngine @ 0xe836a2e8                               |           64 |    25,165,976
+|-  io.leaklab.load.LoadEngine$$Lambda.0x00000000bd33b838 @ 0xe83befe8|           16 |            16
+|  |-  java.lang.Thread$FieldHolder @ 0xe83be098                      |           40 |            56
+|  |  |-  java.lang.Thread @ 0xe83bd900 Unknown                       |          120 |           368
+|  |  '- Total: 1 entry                                               |              |              
+|  '- Total: 1 entry                                                  |              |              
+|-  io.quarkus.arc.impl.ContextInstanceHandleImpl @ 0xe8369e20        |           32 |            64
+'- Total: 2 entries                                                   |              |              
+Total: 1 entry                                                        |              |              
+-----------------------------------------------------------------------------------------------------

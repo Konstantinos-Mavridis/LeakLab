@@ -1,0 +1,253 @@
+<section class="part" id="lab">
+  <div class="num">2</div>
+  <div class="kicker">Part 2</div>
+  <h1>The lab: components, flows and start-up</h1>
+  <div class="bar"></div>
+  <p class="lead">Before running any scenario, meet the cast: every class and every piece of infrastructure, what it
+    stands for in a real system, and how data and evidence move between them. Then follow a container from
+    <code>docker compose up</code> to a live dashboard.</p>
+</section>
+
+<section id="lab-components">
+  <h2>2.1 Components and their roles</h2>
+  <figure>
+    <svg viewBox="0 0 700 300" xmlns="http://www.w3.org/2000/svg">
+      <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#475569"/></marker></defs>
+      <rect x="4" y="4" width="130" height="292" rx="10" fill="#f8fafc" stroke="#94a3b8"/>
+      <text x="69" y="24" font-size="10.5" text-anchor="middle" font-weight="700" fill="#334155">BROWSER</text>
+      <rect x="16" y="40" width="106" height="90" rx="7" fill="#0b1b33"/><text x="69" y="64" font-size="10" fill="#fff" text-anchor="middle" font-weight="700">Control room</text><text x="69" y="80" font-size="8.5" fill="#93c5fd" text-anchor="middle">index.html</text><text x="69" y="93" font-size="8.5" fill="#93c5fd" text-anchor="middle">app.js · Canvas</text><text x="69" y="106" font-size="8.5" fill="#93c5fd" text-anchor="middle">EventSource</text>
+      <rect x="150" y="4" width="546" height="292" rx="12" fill="#fff1f3" stroke="#e11d48" stroke-dasharray="6 4"/>
+      <text x="164" y="22" font-size="10" font-weight="700" fill="#be123c">CONTAINER (cgroup memory.max)</text>
+      <rect x="164" y="32" width="436" height="252" rx="10" fill="#eff6ff" stroke="#0369a1"/>
+      <text x="176" y="50" font-size="10" font-weight="700" fill="#0b3b66">QUARKUS ON OPENJ9 · PID 1</text>
+      <g font-size="9">
+        <rect x="176" y="60" width="118" height="40" rx="5" fill="#fff" stroke="#0369a1"/><text x="235" y="77" text-anchor="middle" font-weight="700">ControlResource</text><text x="235" y="90" text-anchor="middle" fill="#64748b" font-size="8">/api/load · /dumps</text>
+        <rect x="176" y="110" width="118" height="40" rx="5" fill="#fff" stroke="#0369a1"/><text x="235" y="127" text-anchor="middle" font-weight="700">TelemetryResource</text><text x="235" y="140" text-anchor="middle" fill="#64748b">SSE 1 Hz</text>
+        <rect x="314" y="60" width="118" height="40" rx="5" fill="#fff" stroke="#0369a1"/><text x="373" y="77" text-anchor="middle" font-weight="700">LoadEngine</text><text x="373" y="90" text-anchor="middle" fill="#64748b">10 ticks/s · own thread</text>
+        <rect x="452" y="60" width="138" height="40" rx="5" fill="#fff" stroke="#0369a1"/><text x="521" y="77" text-anchor="middle" font-weight="700">CheckoutService</text><text x="521" y="90" text-anchor="middle" fill="#64748b">allocation site</text>
+        <rect x="452" y="110" width="138" height="34" rx="5" fill="#fef3c7" stroke="#b45309"/><text x="521" y="131" text-anchor="middle" font-weight="700" fill="#7c2d12">CustomerSessionCache ⚠</text>
+        <rect x="314" y="110" width="118" height="34" rx="5" fill="#fef3c7" stroke="#b45309"/><text x="373" y="131" text-anchor="middle" font-weight="700" fill="#7c2d12">DirectBufferVault ⚠</text>
+        <rect x="314" y="152" width="118" height="34" rx="5" fill="#fce7f3" stroke="#be185d"/><text x="373" y="173" text-anchor="middle" font-weight="700" fill="#831843">NativeMemoryVault ⚠</text>
+        <rect x="176" y="160" width="118" height="54" rx="5" fill="#fff" stroke="#0369a1"/><text x="235" y="178" text-anchor="middle" font-weight="700">MemoryProbe</text><text x="235" y="191" text-anchor="middle" fill="#64748b">MXBeans · /proc · cgroup</text><text x="235" y="203" text-anchor="middle" fill="#64748b">+ GcWatcher</text>
+        <rect x="176" y="224" width="118" height="40" rx="5" fill="#fff" stroke="#5b3cc4"/><text x="235" y="241" text-anchor="middle" font-weight="700">OomGuardian</text><text x="235" y="254" text-anchor="middle" fill="#64748b">dump at 90 % of limit</text>
+        <rect x="314" y="224" width="118" height="40" rx="5" fill="#fff" stroke="#5b3cc4"/><text x="373" y="241" text-anchor="middle" font-weight="700">DumpService</text><text x="373" y="254" text-anchor="middle" fill="#64748b">com.ibm.jvm.Dump</text>
+        <rect x="452" y="160" width="138" height="40" rx="5" fill="#fff" stroke="#0369a1"/><text x="521" y="177" text-anchor="middle" font-weight="700">LeakMetrics</text><text x="521" y="190" text-anchor="middle" fill="#64748b">/q/metrics</text>
+        <rect x="452" y="210" width="138" height="54" rx="5" fill="#f1f5f9" stroke="#64748b"/><text x="521" y="228" text-anchor="middle" font-weight="700">-Xdump agents</text><text x="521" y="241" text-anchor="middle" fill="#64748b">OOM · SIGQUIT</text><text x="521" y="254" text-anchor="middle" fill="#64748b">verbose GC log</text>
+      </g>
+      <rect x="612" y="110" width="74" height="120" rx="8" fill="#334155"/><text x="649" y="160" font-size="10" fill="#fff" text-anchor="middle" font-weight="700">/dumps</text><text x="649" y="175" font-size="8.5" fill="#cbd5e1" text-anchor="middle">volume / PVC</text><text x="649" y="188" font-size="8.5" fill="#cbd5e1" text-anchor="middle">survives</text><text x="649" y="200" font-size="8.5" fill="#cbd5e1" text-anchor="middle">the kill</text>
+      <path d="M122 70 L174 78" stroke="#475569" stroke-width="1.4" marker-end="url(#a4)"/>
+      <path d="M174 130 L124 110" stroke="#475569" stroke-width="1.4" marker-end="url(#a4)"/>
+      <path d="M294 80 L312 80 M432 80 L450 80 M521 100 L521 108" stroke="#475569" stroke-width="1.4" marker-end="url(#a4)"/>
+      <path d="M373 100 L373 108 M373 144 L373 150" stroke="#475569" stroke-width="1.4" marker-end="url(#a4)"/>
+      <path d="M294 244 L312 244" stroke="#475569" stroke-width="1.4" fill="none" marker-end="url(#a4)"/>
+      <path d="M373 264 L373 277 L649 277 L649 232" stroke="#475569" stroke-width="1.4" fill="none" marker-end="url(#a4)"/>
+      <path d="M590 222 L610 216" stroke="#475569" stroke-width="1.4" fill="none" marker-end="url(#a4)"/>
+    </svg>
+    <figcaption><b>Figure 2.1</b> LeakLab's architecture. Amber/pink boxes are the three intentional leaks. Violet boxes
+      are the evidence path.</figcaption>
+  </figure>
+  <table>
+    <thead><tr><th style="width:20%">Component</th><th style="width:38%">Represents in a real system</th><th>Role in the lab</th></tr></thead>
+    <tbody>
+      <tr><td>LoadEngine</td><td>Incoming production traffic (a load balancer feeding requests)</td><td>Runs on thread <code>leaklab-load-engine</code>, 10 ticks per second. Each tick executes <i>rate ÷ 10</i> simulated requests with the configured payload and retention.</td></tr>
+      <tr><td>CheckoutService</td><td>A business service handling a request</td><td>Allocates the payload (a "rendered quote" <code>byte[]</code>) and a <code>SessionContext</code>; on the retry-aware path calls the cache. This is the <b>allocation site</b>.</td></tr>
+      <tr><td>SessionContext</td><td>Per-request state (customer, attributes, payload)</td><td>The object that leaks. Its count tracks retained requests 1:1.</td></tr>
+      <tr><td>CustomerSessionCache</td><td>A well-intended cache with a fatal key choice</td><td>Static <code>ConcurrentHashMap</code> keyed by unique <code>requestId</code>: no hit, no eviction. The <b>heap leak</b>.</td></tr>
+      <tr><td>DirectBufferVault</td><td>NIO/Netty buffers that are never released</td><td>Direct-memory leak, capped by <code>MaxDirectMemorySize</code>.</td></tr>
+      <tr><td>NativeMemoryVault</td><td>A native library, JNI code or off-heap store that leaks</td><td>FFM <code>Arena</code> allocations outside every JVM limit. The <b>native leak</b>.</td></tr>
+      <tr><td>MemoryProbe</td><td>Your observability agent</td><td>Reads JVM MXBeans, <code>/proc/self/status</code> and cgroup files; computes the verdict.</td></tr>
+      <tr><td>CgroupReader</td><td>The kernel's accounting, as seen from inside</td><td>Parses <code>memory.max</code>, <code>memory.current</code>, <code>memory.stat</code>, <code>memory.events</code> (v2, with a v1 fallback).</td></tr>
+      <tr><td>GcWatcher</td><td>GC log / GC telemetry</td><td>Subscribes to GC notifications; records heap occupancy after each GC (the live set).</td></tr>
+      <tr><td>DumpService</td><td>Your dump tooling (jcmd, agents, runbooks)</td><td>Writes PHD / javacore / core via <code>com.ibm.jvm.Dump</code>; falls back to HPROF on HotSpot; lists and serves files.</td></tr>
+      <tr><td>OomGuardian</td><td>An SRE automation or sidecar watching memory pressure</td><td>Every second: if the working set reaches the threshold, writes javacore + PHD once, then re-arms below 75 %.</td></tr>
+      <tr><td>EventJournal</td><td>Operational event log</td><td>Last 200 events, streamed to the UI and mirrored to stdout.</td></tr>
+      <tr><td>LeakMetrics</td><td>Prometheus instrumentation</td><td>Gauges such as <code>leaklab_retained_bytes</code>, <code>leaklab_heap_live_after_gc_bytes</code>, cgroup working set and limit.</td></tr>
+      <tr><td>Control room UI</td><td>Your Grafana + a load-test console</td><td>Plots every layer against the limit; sends load changes live.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="lab-flows">
+  <h2>2.2 Request, telemetry and evidence flows</h2>
+  <div class="three">
+    <div class="card"><h4>① Request flow</h4>
+      <ol class="small">
+        <li>A LoadEngine tick picks the batch size.</li>
+        <li>For each request it draws a random number: below the retention % means the <b>leaking path</b>.</li>
+        <li><b>Heap</b> mode: <code>CheckoutService.process</code> allocates the <code>byte[]</code> and touches each page.</li>
+        <li>Leaking path: <code>CustomerSessionCache.remember(ctx)</code>, so the context is now reachable from a static field.</li>
+        <li>Otherwise the context becomes garbage when the method returns ("churn").</li>
+        <li><b>Direct</b>/<b>Native</b> modes do the same with a vault instead of the cache.</li>
+      </ol></div>
+    <div class="card"><h4>② Telemetry flow</h4>
+      <ol class="small">
+        <li>The browser opens an <b>EventSource</b> to <code>/api/telemetry/stream</code>.</li>
+        <li>Every second Mutiny emits a tick on a worker thread.</li>
+        <li><code>MemoryProbe.read()</code> collects heap, pools, collectors, buffer pools, RSS and cgroup values, then computes the verdict.</li>
+        <li>Load stats, guardian state, recent GC events and the journal are added.</li>
+        <li>Jackson serialises it to JSON; the SSE frame reaches the browser.</li>
+        <li><code>app.js</code> appends it to a 5-minute history and redraws.</li>
+      </ol></div>
+    <div class="card"><h4>③ Evidence flow</h4>
+      <ol class="small">
+        <li>A trigger fires: a UI button or REST call, <code>kill -QUIT 1</code>, an OOM event, or the guardian.</li>
+        <li>The JVM requests <b>exclusive access</b> (all Java threads pause).</li>
+        <li>The agent walks the heap or collects the report and writes it to <code>/dumps</code>.</li>
+        <li>Threads resume. The file survives on the volume, even after a kill.</li>
+        <li>Copy out: UI download, <code>docker cp</code>, <code>kubectl cp</code>.</li>
+        <li>Analyse: MAT + DTFJ (PHD), a text editor (javacore), GCMV (GC log).</li>
+      </ol></div>
+  </div>
+  <div class="box eli5"><div class="label">Like I'm five</div>
+    <p>① Customers keep arriving and each one leaves a parcel. Most parcels are thrown away after use, but a set
+      percentage are wrongly stuffed into the hoarding basket. ② A helper looks at every room once a second and calls
+      out the numbers to a big scoreboard. ③ When an alarm goes off, everyone freezes for a moment while photos are
+      taken, and the photos go straight into the basement locker.</p></div>
+</section>
+
+<section id="lab-startup">
+  <h2>2.3 From <code>docker compose up</code> to a live dashboard</h2>
+  <p>These steps happen in every scenario. Only the numbers in S3 and S5 differ.</p>
+
+  <div class="step"><div class="step-head"><span class="step-no">S1</span><h3>Build stage: compile the application</h3><span class="when">Containerfile · stage "build"</span></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <p>A multi-stage build starts from <code>maven:3.9.16-ibm-semeru-25-noble</code>, which has a full JDK and Maven.
+        <code>mvn dependency:go-offline</code> caches dependencies in their own image layer. <code>mvn package</code>
+        then compiles bytecode for the selected Java release, 25 or 21 (<code>javac --release</code>, so one JDK 25
+        builder serves both), and runs Quarkus's <b>build-time augmentation</b>, which resolves dependency
+        injection, REST routes and configuration ahead of time. The output is the "fast-jar" layout in
+        <code>target/quarkus-app</code>.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div>
+      <p>In a workshop with every tool available, the furniture is built and flat-packed. The workshop isn't shipped,
+        only the flat-packed furniture.</p></div>
+    <div class="box why"><div class="label">Why</div><p>The runtime image never contains compilers or Maven: it is
+      smaller and has a reduced attack surface. Doing work at build time is why Quarkus starts in about 1.7 s.</p></div>
+  </div>
+
+  <div class="step"><div class="step-head"><span class="step-no">S2</span><h3>Runtime image: a JRE plus the app</h3><span class="when">stage 2</span></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <p>The runtime stage used in this guide is <code>ibm-semeru-runtimes:open-25-jre-noble</code> (OpenJ9), or UBI 9
+        minimal for OpenShift through a build argument. It copies the fast-jar, makes <code>/deployments</code> and
+        <code>/dumps</code> owned by group 0 with group-write permission, and switches to <code>USER 1001</code>. It
+        sets two environment variables: <code>JAVA_OPTS</code> (sizing, overridden per scenario) and
+        <code>JAVA_DIAG_OPTS</code> (dump directory, heap dump on SIGQUIT, dumps for a direct-buffer OOM, rotating
+        verbose GC log). Build arguments pick the VM family, the distribution and the Java release, 17, 21 or 25.
+        The default is a HotSpot JDK, the Red Hat build of OpenJDK 21 on UBI 9, with HotSpot's own diagnostics. Twelve
+        env files, <code>&lt;jvm&gt;-&lt;version&gt;.env</code> (<code>redhat-21.env</code>, <code>semeru-25.env</code>,
+        …), set all three (Appendix C).</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>A clean, empty apartment with just the furniture you need,
+      a camera already mounted by the door, and a diary on the table.</p></div>
+    <div class="box arch"><div class="label">Architect's note</div><p>Group-0 permissions exist because OpenShift runs
+      containers as a <b>random UID</b> that belongs to group 0. An image that only works as root or as one fixed UID
+      will fail under the default <code>restricted-v2</code> security context constraint.</p></div>
+  </div>
+
+  <div class="step"><div class="step-head"><span class="step-no">S3</span><h3>Container creation: the cgroup is born</h3><span class="when">compose.yaml</span></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <p>Docker asks containerd/runc to create the namespaces and a cgroup. <code>mem_limit: 1g</code> becomes
+        <code>memory.max = 1073741824</code>. <code>memswap_limit</code> equal to <code>mem_limit</code> means
+        <b>zero swap</b>, so the container is killed rather than thrashing. <code>./dumps/&lt;jvm&gt;-&lt;version&gt;/&lt;scenario&gt;</code> is
+        bind-mounted at <code>/dumps</code>. <code>restart: "no"</code> keeps a dead container's state for inspection.
+        On Docker Desktop all of this happens inside its Linux VM. That VM is the "node".</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The landlord draws chalk lines on the floor: "this is
+      your space, and no borrowing from the corridor (swap)." The diary's safe is bolted in the basement (bind mount).</p></div>
+    <table class="cast"><caption>Cast</caption><thead><tr><th>Component</th><th>Represents</th><th>Role</th></tr></thead><tbody>
+      <tr><td>compose.yaml</td><td>Deployment descriptor</td><td>Declares limit, swap, volume, port, restart policy per scenario</td></tr>
+      <tr><td>runc / containerd</td><td>Low-level container runtime</td><td>Creates cgroup and namespaces; later reports exit code and the OOM event</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="step"><div class="step-head"><span class="step-no">S4</span><h3>Entrypoint: <code>exec java</code> becomes PID 1</h3></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <p><code>/bin/sh -c "exec java $JAVA_DIAG_OPTS $JAVA_OPTS … -jar quarkus-run.jar"</code>: the shell expands the
+        environment variables, then <code>exec</code> <b>replaces</b> itself with the JVM. Java becomes PID 1, so
+        SIGTERM from <code>docker stop</code> and SIGQUIT from <code>kill -QUIT 1</code> reach the JVM directly.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The receptionist who opened the door steps aside
+      completely, so when someone rings the bell, the tenant answers, not the receptionist.</p></div>
+    <div class="box warn"><div class="label">Pitfall</div><p>Without <code>exec</code>, a shell stays as PID 1, signals
+      don't reach Java, graceful shutdown breaks, and <code>kill -QUIT 1</code> produces nothing.</p></div>
+  </div>
+
+  <div class="step"><div class="step-head"><span class="step-no">S5</span><h3>JVM bootstrap: reading the container and sizing the heap</h3></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <p>OpenJ9 detects that it is running in a container (cgroup v2) and reads <code>memory.max</code>. With
+        <code>-XX:MaxRAMPercentage=60</code> on 1 GiB it sets the maximum heap to <b>614 MiB</b> and <b>reserves</b>
+        that address range (reserved, not resident; see 1.1). An explicit <code>-Xmx</code> overrides this, even if it
+        is larger than the limit (Scenario B). The JVM then initialises gencon, registers the default and configured
+        dump agents, opens <code>/dumps/verbosegc.1.001.log</code>, loads core classes from the shared class cache
+        and starts JIT compiler threads.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The tenant measures the apartment and decides:
+      "my storage room will be at most 60 % of the floor." But if someone hands them a note saying "use 1 GiB of
+      storage", they obey the note, even if the apartment is only 512 MiB.</p></div>
+    <div class="box lab"><div class="label">In the lab</div>
+      <p>The JVM records what it saw in every javacore's ENVINFO section (real excerpt, native scenario):</p>
+<pre>1CICONTINFO    Running in container : TRUE
+1CICGRPINFO    JVM support for cgroups enabled : TRUE
+3CICGRPINFO        Memory Limit : 805306368 bytes      <span class="c"># 768 MiB</span>
+3CICGRPINFO        Swap Limit : 0 bytes</pre></div>
+  </div>
+
+  <div class="step"><div class="step-head"><span class="step-no">S6</span><h3>Quarkus boot</h3></div>
+    <div class="box tech"><div class="label">Technically</div><p>Quarkus loads its pre-computed wiring, instantiates
+      the CDI beans it needs, starts the Vert.x HTTP server on port 8080 and fires <code>StartupEvent</code>.
+      Real log: <code>leaklab 1.0.0 on JVM (powered by Quarkus 3.40.1) started in 1.757s</code>.</p></div>
+  </div>
+
+  <div class="step"><div class="step-head"><span class="step-no">S7</span><h3>LeakLab's start-up hooks</h3></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <ul>
+        <li><b>GcWatcher</b> registers a listener on every <code>GarbageCollectorMXBean</code> (OpenJ9: <i>scavenge</i>
+          and <i>global</i>) to receive before/after usage per pool.</li>
+        <li><b>LoadEngine</b> starts its daemon thread, idle until engaged, and allocates a 24 MiB <i>parachute</i>
+          (explained in <a href="#a9">A9</a>).</li>
+        <li><b>DumpService</b> checks that <code>/dumps</code> is writable and loads <code>com.ibm.jvm.Dump</code>
+          reflectively, which tells it this is OpenJ9.</li>
+        <li><b>TelemetryResource</b> builds and serialises one snapshot (a warm-up).</li>
+        <li><b>OomGuardian</b> is scheduled every second. <b>LeakMetrics</b> registers its gauges.</li>
+      </ul></div>
+    <div class="box why"><div class="label">Why the warm-up</div><p>Some JVM call sites are linked lazily on first use,
+      and linking needs memory. Doing it at boot means the telemetry path still works when the heap is full later.</p></div>
+  </div>
+
+  <div class="step"><div class="step-head"><span class="step-no">S8</span><h3>The browser connects and the verdict appears</h3></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <p><code>index.html</code>, CSS and JS are served from <code>META-INF/resources</code>, with no CDN, so it works
+        air-gapped. The page fetches <code>/api/load</code> and opens the SSE stream. From the first snapshot, the
+        verdict compares <code>heap ceiling + native footprint + direct allowance</code> (native footprint = RSS − heap
+        committed; direct allowance = how far direct buffers may still grow before their cap) with the cgroup limit and classifies the setup as <code>SIZED</code>, <code>TIGHT</code>,
+        <code>OOMKILL_LIKELY</code> or <code>OOMKILL_BY_DESIGN</code>.</p></div>
+    <div class="box lab"><div class="label">In the lab · real first verdicts</div>
+      <table><thead><tr><th>Scenario</th><th class="num">Heap max</th><th class="num">Native</th><th class="num">Projected</th><th class="num">Limit</th><th>Verdict</th></tr></thead><tbody>
+        <tr><td>sized</td><td class="num">614 MiB</td><td class="num">79 MiB</td><td class="num">693 MiB</td><td class="num">1024 MiB</td><td><span class="pill ok">SIZED</span></td></tr>
+        <tr><td>overcommit</td><td class="num">1024 MiB</td><td class="num">78 MiB</td><td class="num">1102 MiB</td><td class="num">512 MiB</td><td><span class="pill bad">OOMKILL_BY_DESIGN</span></td></tr>
+        <tr><td>native</td><td class="num">384 MiB</td><td class="num">78 MiB</td><td class="num">462 MiB</td><td class="num">768 MiB</td><td><span class="pill ok">SIZED</span> <span class="small">(heap math only)</span></td></tr>
+      </tbody></table></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Before anyone brings in a single box, the scoreboard
+      already does the sum: "biggest storage room allowed + furniture = more than the apartment? Then this ends in
+      eviction." Scenario B fails that sum on day one.</p></div>
+  </div>
+</section>
+
+<section id="lab-ui">
+  <h2>2.4 Reading the control room</h2>
+  <table>
+    <thead><tr><th style="width:22%">Panel</th><th style="width:42%">What it shows · where the number comes from</th><th>How to use it</th></tr></thead>
+    <tbody>
+      <tr><td>Configuration verdict</td><td>Heap ceiling + native footprint + direct allowance vs. limit. From MemoryProbe.</td><td>Red before any load means a configuration defect.</td></tr>
+      <tr><td>Live signal</td><td>Slope of the live set (heap leak) vs. slope of the non-heap footprint (off-heap leak) over 90 s, plus time to limit. Silent for the first 2 minutes of JVM uptime: start-up warm-up grows the footprint (measured: ~23 MiB/min on HotSpot for 70–90 s).</td><td>Tells you which runbook to open.</td></tr>
+      <tr><td>Container working set</td><td><code>memory.current − inactive_file</code> vs. <code>memory.max</code>; marker = guardian threshold.</td><td>The kernel's view. This is what kills.</td></tr>
+      <tr><td>Java heap</td><td>Heap used / max / committed (MemoryMXBean).</td><td>Normal to be high between GCs.</td></tr>
+      <tr><td>Live set after GC</td><td>Heap after the most recent GC (GcWatcher), with a sparkline and MiB/min trend.</td><td>The leak indicator.</td></tr>
+      <tr><td>Retained by the leak</td><td>Ground truth from the lab's own counters.</td><td>Check the dump against it: N objects in the UI = N objects in MAT.</td></tr>
+      <tr><td>Process RSS</td><td><code>VmRSS</code> / <code>VmHWM</code> from <code>/proc/self/status</code>.</td><td>RSS up but heap flat → native.</td></tr>
+      <tr><td>Memory budget timeline</td><td>Stacked layers: heap used, heap free (committed), non-heap, direct, native, other native; lines for live set, working set, <code>-Xmx</code> and limit; hatched kill zone.</td><td>See which layer grows and which ceiling it will reach first.</td></tr>
+      <tr><td>Garbage collection</td><td>GC time per second, minor vs. global; overhead % over 60 s.</td><td>A rising global share means the heap is struggling.</td></tr>
+      <tr><td>Load control</td><td>Target, rate, payload, retention; derived leak velocity and time to limit; presets; spikes; release; force GC.</td><td>Drive the experiment.</td></tr>
+      <tr><td>Budget anatomy</td><td>Horizontal bar of the limit with an <code>-Xmx</code> marker. If the marker is in the hatched area, the heap is allowed past the limit.</td><td>The misconfiguration, made visible.</td></tr>
+      <tr><td>Evidence capture</td><td>Dump buttons (each click writes one; System core is OpenJ9 only and greyed out on HotSpot), guardian status, list of files in <code>/dumps</code> with download links.</td><td>Collect and fetch evidence.</td></tr>
+      <tr><td>JVM memory pools</td><td>Every MemoryPoolMXBean: used, committed, after GC; launch arguments.</td><td>Learn the OpenJ9 pool names.</td></tr>
+      <tr><td>Kernel's view</td><td><code>memory.events</code>: <code>max</code>, <code>oom</code>, <code>oom_kill</code>, <code>high</code>; <code>memory.peak</code>.</td><td><code>max</code> rising means the kernel is already reclaiming at the limit.</td></tr>
+      <tr><td>Operations journal</td><td>Every action, OOM, dump and guardian event.</td><td>The timeline of what happened.</td></tr>
+    </tbody>
+  </table>
+</section>

@@ -1,0 +1,259 @@
+<section class="part" id="scenario-b">
+  <div class="num">B</div>
+  <div class="kicker">Scenario B · port 8081</div>
+  <h1>overcommit: the silent kill</h1>
+  <div class="bar"></div>
+  <p class="lead">The same leak as Scenario A, with one configuration mistake that is common in real estates: a heap
+    ceiling larger than the container. The JVM never runs out of memory. The kernel kills it first, and every
+    diagnostic the JVM could have produced is lost.</p>
+  <ul class="inpart">
+    <li>B1 Configuration and verdict</li><li>B2 The heap grows freely</li><li>B3 Approaching the limit</li><li>B4 The OOM killer acts</li>
+    <li>B5 The aftermath</li><li>B6 The same death on Kubernetes</li><li>B7 Proving it</li><li>B8 Fixing it</li>
+  </ul>
+</section>
+
+<section>
+  <div class="step" id="b1"><div class="step-head"><span class="step-no">B1</span><h3>Configuration and verdict</h3><span class="when">compose: overcommit</span></div>
+<pre>mem_limit: 512m    memswap_limit: 512m
+JAVA_OPTS: "-Xmx1g"
+LEAKLAB_GUARDIAN_ENABLED: "false"     <span class="c"># on purpose: watch it die with zero evidence</span></pre>
+    <div class="box tech"><div class="label">Technically</div>
+      <p>An explicit <code>-Xmx</code> <b>overrides</b> container-aware sizing. The JVM knows the cgroup limit (it is
+        in the javacore), but <code>-Xmx</code> is an instruction, so it is obeyed. Heap ceiling 1024 MiB plus
+        non-heap ~78 MiB gives 1102 MiB projected, against a 512 MiB limit:
+        <span class="pill bad">OOMKILL_BY_DESIGN</span>. The heap is allowed to grow into memory the kernel will
+        never grant.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>Someone gave the tenant a note: "your storage room
+      may hold 1,000 boxes". The apartment only fits 512 boxes' worth of everything. The tenant trusts the note.
+      Nobody is lying, but the two rules disagree, and only one of them is the landlord's.</p></div>
+    <div class="box why"><div class="label">Why this happens in real life</div>
+      <ul>
+        <li><code>-Xmx</code> copied from a VM or bare-metal deployment into a container template.</li>
+        <li>The container limit was lowered later (cost optimisation), but <code>JAVA_OPTS</code> wasn't touched.</li>
+        <li>Helm or Kustomize values for limits and JVM flags are owned by different teams.</li>
+        <li>"Java needs 1 GiB" folklore, applied without measuring.</li>
+      </ul></div>
+  </div>
+
+  <div class="step" id="b2"><div class="step-head"><span class="step-no">B2</span><h3>The heap grows freely</h3><span class="when">t = 0 → ~15 s</span></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <p>The leak runs at 20 MiB/s, as in A7. Each global GC finds the live set larger. Free space after GC drops
+        below <code>-Xminf</code>, so OpenJ9 <b>expands</b> the heap. From the JVM's point of view this is healthy:
+        it is still far below its 1 GiB ceiling, so there is no reason to collect harder, compact more or throw.
+        <b>Neither OpenJ9's nor HotSpot's default GC heuristics react to the cgroup getting full</b>. They react
+        to heap occupancy relative to the heap's own limits.</p>
+      <p>Each expansion commits more heap, and as objects are written into it, more pages become resident and are
+        charged to the cgroup.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The storage room keeps getting bigger, because the
+      note says it may. The tenant doesn't feel crowded at all: by their own rule, half the allowed storage is still
+      free. They have no idea the apartment walls are getting close.</p></div>
+    <div class="box lab"><div class="label">In the lab · the UI at the last snapshot before death</div>
+      <p>Java heap <b>423 MiB, 41 % of -Xmx</b> (tag: OPENJ9, green). Container working set <b>507 MiB, 99 % of the
+        512 MiB limit</b> (tag: KILL ZONE). Two panels side by side, telling opposite stories. That contrast is the
+        whole lesson of this scenario.</p></div>
+  </div>
+
+  <div class="step" id="b3"><div class="step-head"><span class="step-no">B3</span><h3>The container approaches its limit</h3><span class="when">t ≈ 15 → 21 s</span></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <ol>
+        <li>Each new page fault charges 4 KiB to the cgroup. <code>memory.current</code> approaches
+          <code>memory.max</code>.</li>
+        <li>To make room, the kernel runs <b>direct reclaim</b> inside the cgroup. It drops clean page cache and
+          file-backed pages (mapped JARs, the shared class cache), which can be re-read from disk later. Each time
+          the limit is hit, <code>memory.events: max</code> increments. This is visible in LeakLab's <i>Kernel's
+          view</i>.</li>
+        <li>There is no swap (<code>memswap_limit = mem_limit</code>), so anonymous memory such as the Java heap
+          cannot be moved out of RAM.</li>
+        <li>Performance may wobble (file pages fault back in), but nothing in the JVM or application logs warns of
+          what is coming.</li>
+      </ol></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The landlord notices the apartment is over the line
+      and starts quietly removing things that can be fetched again later: the newspapers, the library books. But the
+      boxes in the storage room can't be put anywhere else. There is no corridor (swap). Soon there is nothing left to
+      remove.</p></div>
+    <div class="box arch"><div class="label">Architect's note</div><p><code>memory.events max</code> and a working set
+      above ~90 % of the limit are your <b>last early warning</b>. After that comes SIGKILL. Alert on these, and
+      automate evidence capture at this point. That is the guardian pattern in <a href="#d4">D4</a>.</p></div>
+  </div>
+
+  <div class="step" id="b4"><div class="step-head"><span class="step-no">B4</span><h3>The kernel's OOM killer acts</h3><span class="when">t ≈ 21 s · 09:57:39</span></div>
+    <figure>
+      <svg viewBox="0 0 700 120" xmlns="http://www.w3.org/2000/svg">
+        <defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#475569"/></marker></defs>
+        <g font-size="9.5" text-anchor="middle">
+          <rect x="4" y="30" width="110" height="52" rx="6" fill="#eff6ff" stroke="#0369a1"/><text x="59" y="52" font-weight="700">JVM touches</text><text x="59" y="66">a new heap page</text>
+          <rect x="134" y="30" width="110" height="52" rx="6" fill="#fff" stroke="#64748b"/><text x="189" y="52" font-weight="700">page fault</text><text x="189" y="66">charge 4 KiB</text>
+          <rect x="264" y="30" width="110" height="52" rx="6" fill="#fff" stroke="#64748b"/><text x="319" y="52" font-weight="700">over memory.max</text><text x="319" y="66">reclaim fails</text>
+          <rect x="394" y="30" width="110" height="52" rx="6" fill="#fff1f3" stroke="#e11d48"/><text x="449" y="52" font-weight="700" fill="#be123c">memcg OOM</text><text x="449" y="66">pick victim: java</text>
+          <rect x="524" y="30" width="80" height="52" rx="6" fill="#be123c"/><text x="564" y="52" font-weight="700" fill="#fff">SIGKILL</text><text x="564" y="66" fill="#ffe4e6">signal 9</text>
+          <rect x="620" y="30" width="76" height="52" rx="6" fill="#1e293b"/><text x="658" y="52" font-weight="700" fill="#fff">exit 137</text><text x="658" y="66" fill="#cbd5e1">OOMKilled</text>
+        </g>
+        <path d="M114 56 L132 56 M244 56 L262 56 M374 56 L392 56 M504 56 L522 56 M604 56 L618 56" stroke="#475569" stroke-width="1.5" marker-end="url(#a5)"/>
+        <text x="4" y="106" font-size="9.5" fill="#334155">No JVM code runs between the last two boxes. Not a dump agent, not a shutdown hook, not a log flush.</text>
+      </svg>
+      <figcaption><b>Figure B.1</b> The kill path, entirely inside the kernel.</figcaption>
+    </figure>
+    <div class="box tech"><div class="label">Technically</div>
+      <p>A page fault cannot be charged and reclaim made no progress, so the memory-cgroup OOM path runs. The OOM
+        killer scores the processes <i>in this cgroup</i> (essentially by memory size plus
+        <code>oom_score_adj</code>), picks <code>java</code>, and sends <b>SIGKILL</b>. SIGKILL cannot be caught,
+        blocked or handled: the kernel tears the process down directly. The kernel log records
+        <code>oom-kill: constraint=CONSTRAINT_MEMCG … Killed process 1 (java) … anon-rss:…</code>.
+        <code>memory.events</code> increments <code>oom</code> and <code>oom_kill</code>. The runtime receives the OOM
+        notification and the exit status 137.</p></div>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The landlord walks in mid-sentence, picks up the
+      tenant and puts them on the street. There is no time to grab the camera, finish the diary page or say goodbye.
+      The door closes.</p></div>
+    <table class="cast"><caption>Cast</caption><thead><tr><th>Component</th><th>Represents</th><th>Role in this step</th></tr></thead><tbody>
+      <tr><td>Memory cgroup</td><td>The container's memory account</td><td>Refuses the charge</td></tr>
+      <tr><td>OOM killer</td><td>Kernel last resort</td><td>Selects and kills the JVM</td></tr>
+      <tr><td>JVM / dump agents</td><td>The application's safety net</td><td><b>Nothing</b>. They never get a chance to run</td></tr>
+      <tr><td>containerd / Docker</td><td>Runtime</td><td>Records <code>OOMKilled=true</code>, exit 137; emits an <code>oom</code> event</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="step" id="b5"><div class="step-head"><span class="step-no">B5</span><h3>The aftermath: what remains, and what doesn't</h3></div>
+    <div class="box lab"><div class="label">In the lab · real evidence</div>
+<pre>$ docker inspect -f 'OOMKilled={{.State.OOMKilled}} Exit={{.State.ExitCode}}' leaklab-overcommit-semeru-25
+<span class="h">OOMKilled=true Exit=137</span>
+
+$ docker logs --tail 2 leaklab-overcommit-semeru-25   <span class="c"># the log simply stops; no error, no JVMDUMP lines</span>
+09:55:20.681 INFO  [io.quarkus] (main) Installed features: [cdi, micrometer, rest, ...]
+09:57:18.520 INFO  [io.le.journal] Load engine started: HEAP · 100 req/s · 512 KiB · 40% retained
+
+$ ls dumps/semeru-25/overcommit                        <span class="c"># only the GC diary survived</span>
+verbosegc.1.001.log  verbosegc.1.002.log
+
+$ tail dumps/semeru-25/overcommit/verbosegc.1.002.log  <span class="c"># last record before death</span>
+&lt;mem-info id="1853" free="1978776" total="524091392"&gt;      <span class="y"># heap committed ≈ 500 MiB, of a 1 GiB -Xmx</span>
+&lt;mem type="tenure" free="1209480" total="498270208" percent="0"&gt;</pre></div>
+    <table>
+      <thead><tr><th style="width:44%">Expected after a Java OOM</th><th style="width:16%">Present?</th><th>Why not</th></tr></thead>
+      <tbody>
+        <tr><td><code>JVMDUMP055I</code> / <code>010I</code> lines</td><td><span class="pill bad">no</span></td><td>No event was ever raised inside the JVM</td></tr>
+        <tr><td>javacore, PHD, snap in <code>/dumps</code></td><td><span class="pill bad">no</span></td><td>Agents never ran</td></tr>
+        <tr><td><code>java.lang.OutOfMemoryError</code> stack trace</td><td><span class="pill bad">no</span></td><td>The heap was never full relative to <code>-Xmx</code></td></tr>
+        <tr><td>Quarkus "stopped in …s" shutdown line</td><td><span class="pill bad">no</span></td><td>SIGKILL skips shutdown hooks</td></tr>
+        <tr><td>Verbose GC log</td><td><span class="pill ok">yes</span></td><td>Written continuously to the volume. It shows the heap at 500 MiB committed and about to <i>expand</i></td></tr>
+      </tbody>
+    </table>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>When you come back, the apartment is empty. No photos,
+      no notes, no goodbye letter. The only clue is the cleaner's diary, which was kept in the basement locker. Its
+      last page says "storage room half used, plenty of space left". The tenant had no idea.</p></div>
+    <div class="box why"><div class="label">Purpose</div><p>To learn that <b>absence of evidence is evidence</b>.
+      A memory death with no JVM dump lines and an abruptly ending log is, almost by definition, a kill from
+      outside.</p></div>
+  </div>
+
+  <div class="step" id="b6"><div class="step-head"><span class="step-no">B6</span><h3>The same death on Kubernetes / OpenShift</h3></div>
+    <div class="box tech"><div class="label">Technically</div>
+      <ol>
+        <li>The kubelet sees the container exit with reason <code>OOMKilled</code>, exit code 137, and records it in
+          <code>status.containerStatuses[].lastState.terminated</code>.</li>
+        <li>Because the Deployment's <code>restartPolicy</code> is <code>Always</code>, the kubelet restarts the
+          container in the same pod and increments <code>restartCount</code>. Repeated failures back off
+          exponentially, which shows as <b>CrashLoopBackOff</b>.</li>
+        <li><code>terminationMessagePolicy: FallbackToLogsOnError</code> copies the last log lines into
+          <code>lastState.terminated.message</code>.</li>
+        <li>The pod-level view keeps the evidence of the <i>previous</i> instance. <code>oc logs --previous</code>
+          shows its log.</li>
+        <li>Metrics: <code>kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}</code>,
+          <code>kube_pod_container_status_restarts_total</code>, and <code>container_oom_events_total</code>.</li>
+      </ol></div>
+<pre>$ oc get pod -l leaklab.io/scenario=overcommit -o jsonpath='{..lastState.terminated.reason} {..lastState.terminated.exitCode}'
+OOMKilled 137
+$ oc describe pod leaklab-overcommit-…      <span class="c">#  Last State: Terminated · Reason: OOMKilled · Exit Code: 137 · Restart Count: 3</span></pre>
+    <div class="box eli5"><div class="label">Like I'm five</div><p>The building office immediately moves an identical
+      new tenant in, who then gets evicted in exactly the same way. From the street the apartment looks occupied
+      most of the time. You only find out by reading the office's eviction log (<code>lastState</code>,
+      <code>restartCount</code>).</p></div>
+    <div class="box warn"><div class="label">Pitfall</div><p>Auto-restart <b>hides</b> OOMKills. Services look healthy
+      between deaths, and error rates show only short blips. Always alert on restarts with
+      <code>reason="OOMKilled"</code>.</p></div>
+  </div>
+
+  <div class="step" id="b7"><div class="step-head"><span class="step-no">B7</span><h3>Proving it was an OOMKill (and not something else)</h3></div>
+    <div class="box lab"><div class="label">In the lab · scripts/oomkill-forensics.sh docker (real output)</div>
+<pre>── leaklab-overcommit-semeru-25
+   status=exited  OOMKilled=true  exitCode=137  restarts=0  memLimit=512 MiB
+<span class="h">   VERDICT: kernel cgroup OOM kill. The JVM got SIGKILL — no OutOfMemoryError, no shutdown hooks, no -Xdump agents.</span>
+   No JVMDUMP/OOM lines in the log: confirms the JVM never saw it coming.
+Recent OOM events from the Docker daemon (last hour):
+   1792231059  leaklab-overcommit-semeru-25  oom</pre></div>
+    <table>
+      <thead><tr><th style="width:24%">If you see…</th><th style="width:30%">It was…</th><th>Because</th></tr></thead>
+      <tbody>
+        <tr><td>137 + <code>OOMKilled</code></td><td><span class="pill bad">cgroup OOMKill</span></td><td>The runtime received the kernel's OOM event</td></tr>
+        <tr><td>137 + reason <code>Error</code> + probe-failure events</td><td>Liveness-probe kill</td><td>The kubelet sent SIGKILL after the grace period</td></tr>
+        <tr><td>Pod <code>Failed</code>, reason <code>Evicted</code></td><td>Node-pressure eviction</td><td>The node ran low on memory; the kubelet evicted the pod</td></tr>
+        <tr><td><code>JVMDUMP055I … OutOfMemoryError</code></td><td><span class="pill ok">Java OOM</span></td><td>The JVM's own limit tripped (Scenario A)</td></tr>
+        <tr><td>Kernel log <code>CONSTRAINT_MEMCG</code></td><td>The container's own limit</td><td>(vs. <code>CONSTRAINT_NONE</code>: the whole node ran out)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="step" id="b8"><div class="step-head"><span class="step-no">B8</span><h3>Fixing it</h3></div>
+    <table>
+      <thead><tr><th style="width:26%">Fix</th><th>Technically</th><th style="width:30%">Like I'm five</th></tr></thead>
+      <tbody>
+        <tr><td>Size from the limit</td><td>Remove <code>-Xmx</code>; use <code>-XX:MaxRAMPercentage</code> (50–75 % depending on size, see Part 7). The JVM then follows any future change to the limit.</td><td>Throw away the note; let the tenant measure the apartment.</td></tr>
+        <tr><td>Or raise the limit</td><td>If 1 GiB of heap is truly needed, the limit must be about 1.3–1.5 GiB.</td><td>Rent a bigger apartment.</td></tr>
+        <tr><td>Capture evidence before the kill</td><td>Enable the guardian (here: <code>LEAKLAB_GUARDIAN_ENABLED=true</code>) or a platform equivalent at about 90 % of the working set.</td><td>Install the smoke alarm with a camera.</td></tr>
+        <tr><td>Policy as code</td><td>Admission policy (Kyverno / OPA Gatekeeper) that rejects <code>-Xmx</code> above <code>limits.memory</code>, or bans <code>-Xmx</code> outright.</td><td>The building office checks notes before tenants move in.</td></tr>
+        <tr><td>Alerting</td><td>Working set / limit &gt; 0.9; restarts with reason OOMKilled; <code>memory.events max</code> rising.</td><td>Someone reads the eviction log daily.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="box arch nobreak"><div class="label">Scenario B · key takeaways</div>
+    <ul>
+      <li>Two limits, two enforcers. The JVM's safety net only works if its limits sit inside the kernel's.</li>
+      <li>The JVM's GC does not react to container pressure. With <code>-Xmx</code> above the limit, it will happily expand into a kill.</li>
+      <li>An OOMKill leaves no JVM evidence. Plan for evidence <i>before</i> the limit (guardian, alerts) and keep the GC log on a volume.</li>
+      <li>Exit 137 means SIGKILL. The reason field means memory. Check both.</li>
+      <li>Auto-restart hides the problem. Alert on restart reasons.</li>
+    </ul></div>
+</section>
+
+<section class="readiness" id="b-ready">
+  <h2>B · Forensics readiness: what must be in place to prove an OOMKill</h2>
+  <p>After a SIGKILL the JVM can do nothing, and its dump agents never run. Proving <i>what</i> happened and
+    <i>why</i> depends on evidence kept <b>outside</b> the dead process: a GC log on a volume, the runtime's
+    termination record, platform metrics and the node's kernel log. Each of these has to exist before the kill.
+    Nothing can be enabled afterwards.</p>
+  <div class="legend"><span>When it must be in place:</span>
+    <span class="tw build">image build</span>
+    <span class="tw start">start-up · restart</span>
+    <span class="tw live">runtime · no restart</span>
+    <span class="tw platform">platform · beforehand</span>
+    <span class="tw after">after the fact</span>
+    <span>· Lab: <span class="lab-yes">✓</span> · <span class="lab-part">◐</span> · <span class="lab-no">✗</span></span>
+  </div>
+  <table class="ready">
+    <thead><tr><th>Requirement</th><th>Default</th><th>Why it matters</th><th>How: flags, config, tools</th><th>When / restart</th><th>Lab</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="6">Evidence that survives the kill</td></tr>
+      <tr><td>GC log on persistent storage, unique name per start</td><td><span class="def off">off</span></td><td>The only JVM-side evidence after SIGKILL. Its last record shows the heap still expanding. Because <code>%pid</code> is always 1 in a container, the start timestamp in the name stops the restarted container from overwriting it</td><td><code>-Xverbosegclog:/dumps/verbosegc.%Y%m%d.%H%M%S.%pid.%seq.log,5,20000</code> + volume/PVC</td><td><span class="tw start">start-up · restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Termination record kept</td><td><span class="def on">on</span><br>K8s: last instance only; Docker: reset on auto-restart</td><td>Proves reason = OOMKilled, not just "exit 137"</td><td>Docker: no <code>--rm</code>. With an auto-restart policy, <code>State.OOMKilled</code> resets on restart, so rely on <code>docker events</code>. Kubernetes: <code>lastState.terminated</code> and <code>logs --previous</code> are kept automatically, <b>for the last instance only</b></td><td>Docker: <span class="tw start">start-up</span> (run config)<br>K8s: automatic</td><td class="lab-yes">✓</td></tr>
+      <tr><td>Last log lines in the pod status</td><td><span class="def off">off</span><br>default policy: <code>File</code></td><td>Shows what the JVM was doing seconds before death</td><td><code>terminationMessagePolicy: FallbackToLogsOnError</code></td><td><span class="tw start">start-up · restart</span> (pod spec)</td><td class="lab-yes">✓</td></tr>
+      <tr><td>Container metrics history</td><td><span class="def var">varies</span><br>OpenShift: on; plain K8s: install it</td><td>Working set approaching the limit, plus the kill reason, as time series</td><td>kubelet/cAdvisor + kube-state-metrics in Prometheus: <code>container_memory_working_set_bytes</code>, <code>kube_pod_container_status_last_terminated_reason</code>, <code>container_oom_events_total</code></td><td><span class="tw platform">platform · beforehand</span></td><td class="lab-part">◐</td></tr>
+      <tr><td>Node kernel log</td><td><span class="def on">on</span><br>retention varies</td><td>Ground truth: <code>CONSTRAINT_MEMCG</code>, the victim and its RSS</td><td>journald retention on the nodes; node access for the investigator (<code>oc debug node/…</code>, cluster-admin)</td><td><span class="tw platform">platform · beforehand</span></td><td class="lab-part">◐</td></tr>
+      <tr><td>Central log retention</td><td><span class="def off">off</span><br>kubelet keeps ~10 MiB, one previous instance</td><td>A crash-looping pod has had many instances. Only the previous one stays visible (<code>logs --previous</code>), and everything is deleted with the pod</td><td>Cluster log collection with retention (OpenShift Logging, Loki, EFK)</td><td><span class="tw platform">platform · beforehand</span></td><td class="lab-part">◐</td></tr>
+      <tr><td>Metrics actually scraped</td><td><span class="def off">off</span></td><td>The approach to the limit must be recorded <i>before</i> the kill</td><td>OpenShift: <code>ServiceMonitor</code> + user-workload monitoring (annotations are ignored); otherwise a Prometheus scrape config</td><td><span class="tw platform">platform · beforehand</span></td><td class="lab-yes">✓</td></tr>
+      <tr class="group"><td colspan="6">Evidence captured before the limit</td></tr>
+      <tr><td>Pre-kill capture</td><td><span class="def off">off</span></td><td>There's no chance to capture <i>at</i> the limit, so capture shortly before it</td><td>Guardian (<code>LEAKLAB_GUARDIAN_ENABLED</code>, <code>…_THRESHOLD</code>), or a sidecar or alert automation doing <code>kill -QUIT 1</code> + a heap dump at about 90 % of the working set</td><td><span class="tw start">start-up · restart</span> (config) or <span class="tw platform">platform</span></td><td class="lab-no">✗</td></tr>
+      <tr class="group"><td colspan="6">Diagnose the configuration (any time before the kill)</td></tr>
+      <tr><td>Which heap ceiling did the JVM pick?</td><td><span class="def on">on</span></td><td>Compare it with the limit: this scenario fails that sum on day one</td><td><code>kill -QUIT 1</code> → javacore <code>3CICGRPINFO Memory Limit</code> and <code>2CIUSERARG</code>. Or run <code>java $JAVA_OPTS -verbose:sizes -version</code> inside the container (a short-lived second JVM). HotSpot: <code>-XshowSettings:system</code>, <code>-XX:+PrintFlagsFinal</code></td><td><span class="tw live">runtime · no restart</span></td><td class="lab-yes">✓</td></tr>
+      <tr><td>Forensics verdict</td><td><span class="def na">n/a</span></td><td>Java OOM vs OOMKill vs probe kill vs eviction</td><td><code>scripts/oomkill-forensics.sh docker|k8s</code></td><td><span class="tw after">after the fact</span></td><td class="lab-yes">✓</td></tr>
+      <tr class="group"><td colspan="6">Fix</td></tr>
+      <tr><td>Any sizing change</td><td><span class="def na">n/a</span></td><td>Removing <code>-Xmx</code>, adopting a percentage, raising the limit</td><td>Deployment / compose change</td><td><span class="tw start">start-up · restart</span>, always</td><td>–</td></tr>
+    </tbody>
+  </table>
+  <p class="small"><span class="lab-no">✗</span> The guardian is disabled in <i>overcommit</i> on purpose, to show a death
+    with zero evidence. <span class="lab-part">◐</span> Prometheus and node logs exist on Kubernetes/OpenShift; under
+    Docker Desktop, <code>docker events</code> and <code>docker inspect</code> stand in for them. Note: a second JVM
+    (<code>-verbose:sizes</code>) needs memory too. Run it while there is headroom, not at 98 %.</p>
+  <div class="box eli5"><div class="label">Like I'm five</div><p>Once the landlord has evicted the tenant, the tenant
+    can't tell you anything. You need the diary kept in the basement, the eviction notice, the building's camera
+    footage and the landlord's own logbook. All of these have to be set up before the eviction.</p></div>
+</section>

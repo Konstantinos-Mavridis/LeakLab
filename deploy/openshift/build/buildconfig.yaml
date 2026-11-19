@@ -1,0 +1,36 @@
+# Binary build from your working copy — no Git server needed:
+#   oc start-build leaklab --from-dir=app --follow
+# The Containerfile's multi-stage build runs inside the cluster (buildah).
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: leaklab
+  labels:
+    app.kubernetes.io/part-of: leaklab
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+      buildArgs:
+        # The default JVM: the Red Hat build of OpenJDK 21, on UBI 9 (HotSpot). The values below are the Containerfile's
+        # defaults, spelled out to show what to change:
+        #   Java 25:          JAVA_VERSION "25", HOTSPOT_IMAGE registry.access.redhat.com/ubi9/openjdk-25
+        #   Java 17:          JAVA_VERSION "17", HOTSPOT_IMAGE registry.access.redhat.com/ubi8/openjdk-17:1.21 (as redhat-17.env)
+        #   Semeru (OpenJ9):  JVM "openj9", RUNTIME_IMAGE icr.io/appcafe/ibm-semeru-runtimes:open-21-jre-ubi9-minimal
+        #                     (open-25-… / open-17-… with JAVA_VERSION "25" / "17")
+        - name: JVM
+          value: hotspot
+        - name: JAVA_VERSION
+          value: "21"
+        - name: HOTSPOT_IMAGE
+          value: registry.access.redhat.com/ubi9/openjdk-21
+  output:
+    to:
+      kind: ImageStreamTag
+      name: leaklab:latest
+  resources:
+    limits:
+      memory: 2Gi

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LeakLab · JVM Memory Forensics</title>
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b1020'/%3E%3Cpath d='M9 22V10h3v9h6v3z' fill='%2338bdf8'/%3E%3Ccircle cx='22' cy='12' r='3' fill='%23f43f5e'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="9" fill="url(#bm)"/>
+      <path d="M9 22V10h3v9h6v3z" fill="#e0f2fe"/>
+      <circle cx="22.5" cy="11.5" r="3.2" fill="#fb7185"/>
+      <defs><linearGradient id="bm" x1="0" y1="0" x2="32" y2="32"><stop stop-color="#0ea5e9"/><stop offset="1" stop-color="#6d28d9"/></linearGradient></defs>
+    </svg>
+    <div>
+      <div class="brand-name">LeakLab</div>
+      <div class="brand-sub">JVM memory forensics · control room</div>
+    </div>
+  </div>
+  <div class="chips">
+    <span class="chip chip-scenario" id="chip-scenario">scenario</span>
+    <span class="chip" id="chip-runtime">runtime</span>
+    <span class="chip" id="chip-cgroup">cgroup</span>
+    <span class="chip chip-live" id="chip-live"><i></i><span>connecting</span></span>
+  </div>
+</header>
+
+<main class="grid">
+
+  <!-- Verdict -->
+  <section class="card verdict span-12" id="verdict" data-level="SIZED">
+    <div class="verdict-icon" aria-hidden="true"></div>
+    <div class="verdict-body">
+      <div class="eyebrow">Configuration verdict · <span id="verdict-level">—</span></div>
+      <h1 id="verdict-headline">Waiting for telemetry…</h1>
+      <p id="verdict-detail"></p>
+    </div>
+    <div class="verdict-math">
+      <div class="math-row"><span>Heap ceiling (-Xmx)</span><b id="vm-xmx">—</b></div>
+      <div class="math-row"><span>+ Native footprint</span><b id="vm-native">—</b></div>
+      <div class="math-row" title="How much more direct buffers may grow before the JVM's own cap (MaxDirectMemorySize, default ≈ max heap) stops them"><span>+ Direct allowance</span><b id="vm-direct">—</b></div>
+      <div class="math-row total"><span>= Projected peak</span><b id="vm-peak">—</b></div>
+      <div class="math-row limit"><span>Container limit</span><b id="vm-limit">—</b></div>
+    </div>
+    <div class="signal" id="signal">
+      <div class="eyebrow">Live signal</div>
+      <div class="signal-text" id="signal-text">Collecting baseline…</div>
+    </div>
+  </section>
+
+  <!-- KPIs -->
+  <section class="kpis span-12">
+    <article class="card kpi" id="kpi-ws">
+      <div class="kpi-head"><span>Container working set</span><span class="tag" id="kpi-ws-tag">—</span></div>
+      <div class="kpi-value" id="kpi-ws-value">—</div>
+      <div class="meter"><i id="kpi-ws-bar"></i><em id="kpi-ws-guard"></em></div>
+      <div class="kpi-foot" id="kpi-ws-foot">of — cgroup limit</div>
+    </article>
+    <article class="card kpi">
+      <div class="kpi-head"><span>Java heap</span><span class="tag" id="kpi-heap-tag">—</span></div>
+      <div class="kpi-value" id="kpi-heap-value">—</div>
+      <div class="meter heap"><i id="kpi-heap-bar"></i></div>
+      <div class="kpi-foot" id="kpi-heap-foot">of — -Xmx</div>
+    </article>
+    <article class="card kpi">
+      <div class="kpi-head"><span>Live set after GC</span><span class="tag" id="kpi-live-tag">—</span></div>
+      <div class="kpi-value" id="kpi-live-value">—</div>
+      <svg class="spark" id="kpi-live-spark" viewBox="0 0 200 36" preserveAspectRatio="none"></svg>
+      <div class="kpi-foot" id="kpi-live-foot">the floor of the sawtooth</div>
+    </article>
+    <article class="card kpi">
+      <div class="kpi-head"><span>Retained by the leak</span><span class="tag" id="kpi-ret-tag">—</span></div>
+      <div class="kpi-value" id="kpi-ret-value">—</div>
+      <div class="kpi-split" id="kpi-ret-split"></div>
+      <div class="kpi-foot" id="kpi-ret-foot">—</div>
+    </article>
+    <article class="card kpi">
+      <div class="kpi-head"><span>Process RSS</span><span class="tag" id="kpi-rss-tag">—</span></div>
+      <div class="kpi-value" id="kpi-rss-value">—</div>
+      <svg class="spark" id="kpi-rss-spark" viewBox="0 0 200 36" preserveAspectRatio="none"></svg>
+      <div class="kpi-foot" id="kpi-rss-foot">—</div>
+    </article>
+  </section>
+
+  <!-- Timeline -->
+  <section class="card span-8 chart-card">
+    <div class="card-head">
+      <div>
+        <h2>Memory budget timeline</h2>
+        <p>Every layer that the kernel charges to this container, stacked against the cgroup limit.</p>
+      </div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="chart-wrap"><canvas id="timeline" aria-label="Memory timeline chart"></canvas><div class="tooltip" id="tt"></div></div>
+    <div class="card-head sub">
+      <div><h3>Garbage collection</h3><p>GC pause time per second — minor vs. global/major.</p></div>
+      <div class="gc-stats" id="gc-stats"></div>
+    </div>
+    <div class="chart-wrap short"><canvas id="gcchart" aria-label="GC activity chart"></canvas></div>
+  </section>
+
+  <!-- Control deck -->
+  <section class="card span-4 deck">
+    <div class="card-head">
+      <div><h2>Load control</h2><p>Changes apply live to the running JVM.</p></div>
+      <button class="engage" id="engage" type="button" aria-pressed="false"><span class="dot"></span><span class="lbl">Engage</span></button>
+    </div>
+
+    <div class="field">
+      <label>Leak target</label>
+      <div class="segmented" id="mode" role="radiogroup">
+        <button type="button" role="radio" data-mode="HEAP"><b>Heap</b><small>session cache</small></button>
+        <button type="button" role="radio" data-mode="DIRECT"><b>Direct</b><small>ByteBuffer</small></button>
+        <button type="button" role="radio" data-mode="NATIVE"><b>Native</b><small>FFM arena</small></button>
+      </div>
+    </div>
+
+    <div class="field slider">
+      <div class="slider-head"><label for="rate">Request rate</label><output id="rate-out">—</output></div>
+      <input type="range" id="rate" min="0" max="1000" step="1">
+    </div>
+    <div class="field slider">
+      <div class="slider-head"><label for="payload">Payload per request</label><output id="payload-out">—</output></div>
+      <input type="range" id="payload" min="0" max="1000" step="1">
+    </div>
+    <div class="field slider">
+      <div class="slider-head"><label for="retention">Retention (leaking path)</label><output id="retention-out">—</output></div>
+      <input type="range" id="retention" min="0" max="100" step="1">
+    </div>
+    <div class="field">
+      <label>After an OutOfMemoryError</label>
+      <div class="segmented two" id="on-oom" role="radiogroup">
+        <button type="button" role="radio" data-oom="pause"><b>Pause</b><small>JVM stays diagnosable</small></button>
+        <button type="button" role="radio" data-oom="keep"><b>Keep running</b><small>like real traffic</small></button>
+      </div>
+    </div>
+
+    <div class="velocity">
+      <div><span>Leak velocity</span><b id="velocity">—</b></div>
+      <div><span>Churn (garbage)</span><b id="churn">—</b></div>
+      <div><span>Time to limit</span><b id="ttl">—</b></div>
+    </div>
+
+    <div class="field">
+      <label>Presets</label>
+      <div class="presets">
+        <button type="button" data-preset="healthy">Healthy churn</button>
+        <button type="button" data-preset="slow">Slow leak</button>
+        <button type="button" data-preset="aggressive">Aggressive leak</button>
+        <button type="button" data-preset="native">Native bleed</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Instant spike (current target)</label>
+      <div class="row">
+        <button type="button" class="btn" data-burst="64">+64 MiB</button>
+        <button type="button" class="btn" data-burst="256">+256 MiB</button>
+        <button type="button" class="btn" data-burst="512">+512 MiB</button>
+      </div>
+    </div>
+
+    <div class="row actions">
+      <button type="button" class="btn ghost" id="gc">Force GC</button>
+      <button type="button" class="btn ok" id="release">Release retained</button>
+    </div>
+  </section>
+
+  <!-- Anatomy -->
+  <section class="card span-8">
+    <div class="card-head">
+      <div><h2>Budget anatomy</h2><p>Where every byte of the container limit goes right now — and where -Xmx allows the heap to grow.</p></div>
+    </div>
+    <div class="anatomy" id="anatomy">
+      <div class="anatomy-track" id="anatomy-track"></div>
+      <div class="anatomy-scale" id="anatomy-scale"></div>
+    </div>
+    <div class="anatomy-legend" id="anatomy-legend"></div>
+  </section>
+
+  <!-- Diagnostics -->
+  <section class="card span-4 diag">
+    <div class="card-head">
+      <div><h2>Evidence capture</h2><p id="dump-dir">dump directory —</p></div>
+    </div>
+    <div class="row three">
+      <button type="button" class="btn capture" data-dump="heap" title="Write a heap dump now (.phd on OpenJ9, .hprof on HotSpot)"><b>Heap dump</b><small id="heap-format">PHD</small></button>
+      <button type="button" class="btn capture" data-dump="javacore" id="javacore-label" title="Write now · OpenJ9: javacore (threads, GC history, NATIVEMEMINFO) · HotSpot: VM report (jcmd Thread.print, VM.native_memory, VM.flags)"><b>Javacore</b><small>threads · native</small></button>
+      <button type="button" class="btn capture" data-dump="system" id="system-core" title="Write a full OS core of the process now — size ≈ RSS"><b>System core</b><small>≈ RSS size</small></button>
+    </div>
+    <div class="guardian" id="guardian">
+      <div class="guardian-head"><span class="eyebrow">OOMKill guardian</span><span class="tag" id="guardian-tag">—</span></div>
+      <div class="meter"><i id="guardian-bar"></i><em id="guardian-mark"></em></div>
+      <p id="guardian-text">—</p>
+    </div>
+    <ul class="files" id="files"><li class="empty">No artefacts yet.</li></ul>
+  </section>
+
+  <!-- Pools -->
+  <section class="card span-6">
+    <div class="card-head"><div><h2>JVM memory pools</h2><p id="pools-sub">As reported by MemoryPoolMXBean.</p></div></div>
+    <table class="pools">
+      <thead><tr><th>Pool</th><th>Used / committed</th><th class="num">Used</th><th class="num">After GC</th></tr></thead>
+      <tbody id="pools"></tbody>
+    </table>
+    <details class="args">
+      <summary>JVM launch arguments</summary>
+      <div id="args"></div>
+    </details>
+  </section>
+
+  <!-- Kernel + journal -->
+  <section class="card span-6 kernel">
+    <div class="card-head"><div><h2>Kernel's view</h2><p>cgroup <code>memory.events</code> — what the OOM killer counts.</p></div></div>
+    <div class="kernel-grid" id="kernel"></div>
+    <div class="card-head sub"><div><h3>Operations journal</h3></div></div>
+    <ol class="journal" id="journal"></ol>
+  </section>
+</main>
+
+<footer class="foot">
+  LeakLab — a teaching rig. Endpoints are unauthenticated by design; never route them publicly.
+  <a href="q/metrics" target="_blank" rel="noopener">/q/metrics</a> · <a href="q/health" target="_blank" rel="noopener">/q/health</a> · <a href="api/telemetry" target="_blank" rel="noopener">/api/telemetry</a>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="assets/app.js"></script>
+</body>
+</html>
